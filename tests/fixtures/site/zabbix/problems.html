@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Zabbix falso</title></head>
+<body><main><script src="zabbix.js"></script><script>
+// Cabeçalho 'Time' mesclado com as colunas da linha do tempo; separador de data entre os dias.
+const row = (when, sevClass, sev, recovery, status, host, problem, duration, ack) =>
+  '<tr><td>' + zbxTime(when) + '</td><td class="timeline-axis"></td><td class="timeline-td"></td>' +
+  '<td class="' + sevClass + '">' + sev + '</td><td>' + recovery + '</td><td>' + status + '</td><td></td><td>' + host +
+  '</td><td>' + problem + '</td><td>' + duration + '</td><td>' + ack + '</td><td></td><td></td></tr>';
+const rows = [
+  row(ago(60), 'high-bg', 'High', '', 'PROBLEM', 'srv-010', 'Zabbix agent is not available', '1h', 'No'),
+  row(ago(30), 'disaster-bg', 'Disaster', '', 'PROBLEM', 'srv-020', 'MySQL is down', '30m', 'No'),
+  '<tr class="timeline-separator"><td colspan="13">Yesterday</td></tr>',
+  row(ago(26 * 60), 'average-bg', 'Average', zbxTime(ago(25 * 60)), 'RESOLVED', 'srv-007', 'High CPU utilization', '1h 0m', 'Yes'),
+  row(ago(40 * 24 * 60), 'warning-bg', 'Warning', '', 'PROBLEM', 'srv-007', 'Disk space is low', '1M 10d', 'No'),
+  row(ago(90), 'na-bg', '', '', 'PROBLEM', 'srv-030', 'Custom check', '1h 30m', 'No'),
+];
+writeTable('<th colspan="3">Time</th><th>Severity</th><th>Recovery time</th><th>Status</th><th>Info</th><th>Host</th>' +
+  '<th>Problem</th><th>Duration</th><th>Update</th><th>Actions</th><th>Tags</th>', rows);
+</script></main></body></html>

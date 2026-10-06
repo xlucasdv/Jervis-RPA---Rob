@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- Imita o login em duas etapas da Acronis (login → Avançar → senha). -->
+<html><head><meta charset="utf-8"><title>Login em duas etapas</title></head>
+<body>
+<div id="err" role="alert" style="display:none"></div>
+<form id="step1">
+  <input name="login" type="email">
+  <button type="submit">Avançar</button>
+</form>
+<form id="step2" style="display:none">
+  <input name="password" type="password">
+  <button type="submit">Entrar</button>
+</form>
+<script>
+  const fail = msg => { err.textContent = msg; err.style.display = 'block'; };
+  step1.addEventListener('submit', e => {
+    e.preventDefault();
+    setTimeout(() => {
+      if (step1.login.value !== 'operador@empresa.com') return fail('Conta não encontrada.');
+      step1.style.display = 'none'; step2.style.display = 'block';
+    }, 300);
+  });
+  step2.addEventListener('submit', e => {
+    e.preventDefault();
+    setTimeout(() => {
+      if (step2.password.value !== 'S3nh@-forte') return fail('Senha incorreta.');
+      location.href = 'dashboard.html';
+    }, 300);
+  });
+</script>
+</body></html>

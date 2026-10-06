@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- Imita a tela de login do Zabbix. Parâmetros: ?mfa=1 exige código 123456. -->
+<html><head><meta charset="utf-8"><title>Login falso</title></head>
+<body>
+<div class="signin-container">
+  <div id="err" class="red" style="display:none"></div>
+  <form id="f">
+    <input id="name" name="name">
+    <input id="password" name="password" type="password">
+    <button id="enter" type="submit">Entrar</button>
+  </form>
+  <form id="mfa" style="display:none">
+    <input id="verification_code" name="verification_code">
+    <button type="submit">Verificar</button>
+  </form>
+</div>
+<script>
+  const needMfa = new URLSearchParams(location.search).get('mfa') === '1';
+  const fail = msg => { err.textContent = msg; err.style.display = 'block'; };
+  f.addEventListener('submit', e => {
+    e.preventDefault();
+    err.style.display = 'none';
+    setTimeout(() => {  // simula a latência do servidor
+      if (document.getElementById('name').value !== 'operador' || password.value !== 'S3nh@-forte') {
+        return fail('Usuário ou senha incorretos.');
+      }
+      if (needMfa) { f.style.display = 'none'; mfa.style.display = 'block'; }
+      else location.href = 'dashboard.html';
+    }, 300);
+  });
+  mfa.addEventListener('submit', e => {
+    e.preventDefault();
+    setTimeout(() => {
+      if (verification_code.value === '123456') location.href = 'dashboard.html';
+      else fail('Código de verificação inválido.');
+    }, 300);
+  });
+</script>
+</body></html>

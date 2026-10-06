@@ -1,0 +1,79 @@
+# Jervis3000
+
+Ferramenta em Python + Selenium que acessa, de forma autorizada e automatizada, as plataformas
+**Sophos Central**, **Acronis Cyber Protect Cloud** e **Zabbix**, coleta informações de segurança, backup e
+monitoramento, padroniza e classifica os dados e gera um relatório geral (HTML, PDF, Excel e CSV), manualmente
+ou de forma agendada.
+
+```
+login automatizado ─► coleta das 3 plataformas ─► consolidação e classificação ─► relatórios ─► notificação
+  (credenciais no       (falhas isoladas por         (crítico, indisponível,       (resumo        (e-mail,
+   cofre do sistema)     página, reprocessáveis)      falha de coleta, atenção)     executivo)     Teams)
+```
+
+## Início rápido
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -e ".[dev]"
+.venv\Scripts\python -m jervis init                    # cria config\platforms.yaml
+.venv\Scripts\python -m jervis platforms set-url zabbix https://zabbix.empresa.com.br/index.php
+.venv\Scripts\python -m jervis credentials set zabbix --username svc_coleta
+.venv\Scripts\python -m jervis platforms enable zabbix
+.venv\Scripts\python -m jervis check zabbix --headed   # valida login, páginas e colunas, sem coletar
+.venv\Scripts\python -m jervis collect                 # coleta, consolida e gera os relatórios
+.venv\Scripts\python -m jervis report --open
+```
+
+Em máquinas com política de controle de aplicativos, configure um driver do navegador aprovado antes
+([instalação](docs/instalacao.md#driver-do-navegador-em-máquinas-corporativas)).
+
+## Documentação
+
+| Documento | Conteúdo |
+|---|---|
+| [Instalação](docs/instalacao.md) | Pré-requisitos, ambiente Python, driver do navegador, primeira configuração, atualização |
+| [Configuração](docs/configuracao.md) | Arquivo de configuração, plataformas, seletores, ajustes de coleta, credenciais, **ambientes** (dev/hml/prod), agendamentos, notificações |
+| [Execução e operação](docs/execucao.md) | Verificação, coleta, reprocessamento, relatórios, histórico, agendamento, **monitoramento da ferramenta**, auditoria |
+| [Plataformas e dados coletados](docs/plataformas.md) | O que é coletado de cada plataforma, modelo padrão, regras de classificação, relatórios |
+| [Solução de problemas](docs/solucao-de-problemas.md) | O que fazer para cada tipo de falha (login, interface alterada, tempo esgotado, driver, agendamento...) |
+| [Estrutura do projeto](docs/estrutura.md) | Arquitetura, módulos, formatos de dados, testes |
+| [Inclusão de novas plataformas](docs/novas-plataformas.md) | Passo a passo com exemplo e checklist |
+| [Rastreabilidade dos requisitos](docs/requisitos.md) | Onde cada feature dos 9 épicos está implementada e como verificá-la |
+
+## Comandos
+
+| Comando | Para quê |
+|---|---|
+| `jervis status` | Saúde da ferramenta: OK / atenção / crítico (código de saída 0/2/3) |
+| `jervis check [plataformas]` | Verifica login, páginas e colunas nas plataformas reais, sem coletar |
+| `jervis collect [plataformas]` | Coleta, consolida e gera relatórios (`--retry N` para reprocessar sozinho) |
+| `jervis retry [execução]` | Reprocessa só as plataformas/páginas que falharam |
+| `jervis runs` / `runs show` / `runs prune` | Histórico e detalhes das execuções; retenção |
+| `jervis report` / `consolidate` | Refaz relatórios ou consolidado de uma execução |
+| `jervis schedule list / install / uninstall / run / serve` | Agendamento (Agendador de Tarefas do Windows ou interno) |
+| `jervis platforms ...` / `credentials ...` | Cadastro das plataformas e das credenciais (cofre do sistema) |
+| `jervis login [plataformas]` | Testa só o login |
+| `jervis notify set-smtp-password / set-webhook / test` | Notificações por e-mail e Teams/Slack |
+| `jervis audit [--verify]` | Trilha de auditoria (quem coletou e quem alterou a configuração) |
+| `jervis config show` | Configuração efetiva (base + ambiente) |
+
+Opções globais: `--env <ambiente>` (ou `JERVIS_ENV`), `-c <arquivo>`, `-v`. Use sempre
+`.venv\Scripts\python -m jervis ...`.
+
+## Segurança
+
+- Credenciais e segredos (senhas, TOTP, senha do SMTP, URL do webhook) ficam no cofre do sistema operacional,
+  separado por ambiente, ou em variáveis de ambiente, **nunca** no código ou no arquivo de configuração.
+- Senhas são mascaradas em logs, resultados, relatórios e auditoria; usuários aparecem parcialmente mascarados.
+- Conteúdo lido das plataformas é escapado nos relatórios HTML.
+- Trilha de auditoria encadeada por hash (`jervis audit --verify`).
+
+## Testes
+
+```powershell
+.venv\Scripts\python -m pytest -q                                  # unitários, integração e navegação (~2 min)
+.venv\Scripts\python -m pytest -q --cov=jervis --cov-report=term   # com cobertura
+```
+
+Detalhes em [Estrutura do projeto](docs/estrutura.md#testes).

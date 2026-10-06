@@ -1,0 +1,8 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Zabbix falso</title></head>
+<body><main><script src="zabbix.js"></script><script>
+const rows = [['srv-001', 'CPU utilization', zbxTime(ago(2)), '12 %'], ['srv-001', 'Uptime', zbxTime(ago(1)), '10d'],
+  ['srv-002', 'CPU utilization', zbxTime(ago(3 * 24 * 60)), '3 %']]
+  .map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>');
+writeTable('<th>Host</th><th>Name</th><th>Last check</th><th>Last value</th>', rows);
+</script></main></body></html>

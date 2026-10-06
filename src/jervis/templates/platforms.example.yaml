@@ -1,0 +1,122 @@
+# Configuração das plataformas consultadas pelo Jervis3000.
+#
+# Este arquivo NÃO deve conter usuários, senhas ou segredos MFA.
+# Cadastre as credenciais com:   jervis credentials set <plataforma>
+# ou via variáveis de ambiente:  JERVIS_<PLATAFORMA>_USERNAME / _PASSWORD / _TOTP_SECRET
+
+settings:
+  browser: edge              # edge | chrome | firefox
+  driver_path: ""            # vazio = download automático; em máquinas com política de controle
+                             # de aplicativos, informe um driver aprovado, ex.: C:/drivers/msedgedriver.exe
+  headless: true             # false para ver o navegador (útil para ajustar seletores)
+  page_load_timeout: 60      # segundos
+  login_timeout: 30          # segundos aguardando cada etapa do login
+  collect_timeout: 30        # segundos aguardando cada tabela/página da coleta
+  log_file: logs/jervis.log
+  output_dir: output         # resultados da coleta: output/<data-hora>/<plataforma>.json
+  screenshot_on_failure: false
+  screenshot_dir: logs/screenshots
+  # Consolidação (classificação dos registros)
+  stale_device_days: 7       # endpoint Sophos sem comunicação há mais dias = indisponível
+  critical_availability_pct: 95.0  # indicador Zabbix abaixo deste % = crítico (abaixo da meta = atenção)
+  # Relatórios gerados ao fim de cada coleta, em output/<data-hora>/relatorio.*
+  report_formats: [html, xlsx, csv, pdf]   # o PDF é impresso pelo navegador configurado acima
+  report_title: Relatório geral de TI
+  # Auditoria, histórico e qualidade dos dados
+  audit_file: logs/auditoria.jsonl   # quem iniciou cada coleta e ações administrativas (encadeado por hash)
+  retention_days: 90       # remove pastas de execução mais antigas (0 = manter tudo); o histórico é mantido
+  incomplete_drop_pct: 50  # avisa se um conjunto vier com 50% menos registros que na última coleta bem-sucedida
+  max_hours_without_success: 26  # 'jervis status' fica crítico se uma plataforma ativa passar disso sem sucesso
+
+platforms:
+  sophos:
+    kind: sophos
+    enabled: false
+    url: https://central.sophos.com/manage
+    environment: producao
+    description: Sophos Central
+    mfa: totp                # Sophos Central exige MFA: none | totp | prompt
+    # params:                # opcional: ajustes da coleta (padrões em jervis/collectors/sophos.py)
+    #   retries: 1           # novas tentativas por página em falhas transitórias
+    #   dispositivos:
+    #     pages: {computador: /manage/endpoint/computers-list, servidor: /manage/server/servers-list}
+    #     columns: {status_agente: ["Integridade", "Health"]}   # rótulos das colunas na tela
+    #   alertas:
+    #     pages: {alerta: /manage/overview/alerts}
+    #     table: {next_page: "button[aria-label='Próxima página']"}
+
+  acronis:
+    kind: acronis
+    enabled: false
+    url: ""                  # ex.: https://us5-cloud.acronis.com/login (varia por datacenter)
+    environment: producao
+    description: Acronis Cyber Protect Cloud
+    mfa: none
+    # params:                # opcional: ajustes da coleta (padrões em jervis/collectors/acronis.py)
+    #   max_age_hours: 26    # backup mais antigo que isso é destacado como "desatualizado"
+    #   date_order: auto     # auto | dmy | mdy — como ler datas numéricas (06/10/2026)
+    #   dispositivos:
+    #     pages: {dispositivo: /ui/#/devices/all}
+    #   tarefas:
+    #     pages: {atividade: /ui/#/activities}
+    #     columns: {tamanho: ["Dados copiados"]}
+
+  zabbix:
+    kind: zabbix
+    enabled: false
+    url: ""                  # ex.: https://zabbix.empresa.com.br/index.php
+    environment: producao
+    description: Zabbix
+    mfa: none
+    # params:                # opcional: ajustes da coleta (padrões em jervis/collectors/zabbix.py)
+    #   min_availability: 99.0   # indicadores abaixo deste % de disponibilidade são destacados
+    #   problemas:
+    #     pages: {ativo: "zabbix.php?action=problem.view&filter_set=1&filter_show=2"}
+    #   disponibilidade:
+    #     pages: {relatorio_30d: "report2.php?mode=0&filter_set=1&from=now-30d&to=now"}
+    #   itens:               # desativado por padrão: preenche a última atualização de cada host
+    #     pages: {dados_recentes: "zabbix.php?action=latest.view"}
+
+  # Outra instância do mesmo tipo (ex.: ambiente de homologação):
+  # zabbix_hml:
+  #   kind: zabbix
+  #   enabled: false
+  #   url: https://zabbix-hml.empresa.com.br/index.php
+  #   environment: homologacao
+  #   login_timeout: 45
+  #   selectors:             # sobrescreve os seletores padrão do tipo, se o layout for diferente
+  #     error: ["div.red", ".msg-bad"]
+
+# Notificações ao fim de cada execução (opcional). Segredos ficam no cofre do sistema:
+#   jervis notify set-smtp-password    |    jervis notify set-webhook    |    jervis notify test
+# notifications:
+#   when: [parcial, falha]       # sucesso | parcial | falha
+#   email:
+#     smtp_host: smtp.empresa.com.br
+#     smtp_port: 587
+#     starttls: true
+#     sender: jervis@empresa.com.br
+#     recipients: [ti@empresa.com.br]
+#     username: jervis@empresa.com.br   # omita se o relay não exige autenticação
+#     attach_report: true        # anexa o relatorio.html
+#   webhook: true                # Teams (Workflows), Slack ou JSON genérico
+#   webhook_format: teams        # teams | slack | json
+
+# Agendamentos (Épico 7). Instale no Agendador de Tarefas do Windows com: jervis schedule install
+# Use aspas nos horários ("07:00"): sem elas, o YAML pode interpretá-los como números.
+schedules:
+  diaria:
+    enabled: false
+    frequency: daily         # daily | weekly | hourly
+    times: ["07:00"]         # um ou mais horários definidos pelo administrador
+    retries: 1               # reprocessa automaticamente as falhas
+    retry_delay_minutes: 10  # espera antes de reprocessar
+  # semanal:
+  #   frequency: weekly
+  #   days: [mon, thu]       # ou seg, ter, qua, qui, sex, sab, dom
+  #   times: ["08:00"]
+  # a_cada_4h:
+  #   frequency: hourly
+  #   every_hours: 4
+  #   start: "06:00"         # 06:00, 10:00, 14:00, 18:00, 22:00, 02:00
+  #   platforms: [zabbix]    # opcional: padrão = todas as plataformas ativas

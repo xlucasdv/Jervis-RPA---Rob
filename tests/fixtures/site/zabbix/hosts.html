@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Zabbix falso</title></head>
+<body><main><script src="zabbix.js"></script><script>
+// 60 hosts em 2 páginas. srv-010/020/...: agente indisponível; srv-007: parcial; srv-013: desativado.
+const rows = Array.from({ length: 60 }, (_, k) => {
+  const i = k + 1, name = 'srv-' + String(i).padStart(3, '0');
+  let avail = badge('status-green', 'ZBX'), status = badge('green', 'Enabled');
+  if (i % 10 === 0) avail = badge('status-red', 'ZBX');
+  if (i === 7) avail = badge('status-green', 'ZBX') + ' ' + badge('status-red', 'SNMP');
+  if (i === 13) { avail = badge('status-grey', 'ZBX'); status = badge('red', 'Disabled'); }
+  return '<tr><td><a href="#">' + name + '</a></td><td>10.0.0.' + i + ':10050</td><td>' + avail +
+    '</td><td></td><td>' + status + '</td><td><a href="#">Latest data</a></td><td></td></tr>';
+});
+writeTable('<th>Name</th><th>Interface</th><th>Availability</th><th>Tags</th><th>Status</th><th>Latest data</th><th>Problems</th>', rows);
+</script></main></body></html>

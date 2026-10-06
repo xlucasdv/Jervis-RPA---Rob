@@ -1,0 +1,9 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Sophos falso</title></head>
+<body><div id="app"></div><script src="../common/table.js"></script><script>
+const sev = s => '<span class="sev" aria-label="' + s + '"></span>';
+renderTable({ headers: ['Severity', 'Date/Time', 'Description', 'Who/What', 'Status'], rows: [
+  [sev('High'), 'Oct 6, 2026 8:01 AM', 'Malware detected: Troj/Agent-XYZ', 'PC-003', 'Open'],
+  [sev('Medium'), 'Oct 5, 2026 3:22 PM', 'Real-time protection disabled', 'PC-007', 'Open'],
+  [sev('Low'), 'Oct 4, 2026 11:10 AM', 'Computer not seen recently', 'SRV-FS01', 'Resolved']] });
+</script></body></html>

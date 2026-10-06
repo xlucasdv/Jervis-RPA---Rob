@@ -1,0 +1,1 @@
+"""Autenticação automatizada nas plataformas."""

@@ -1,0 +1,7 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Zabbix falso</title></head>
+<body><main><script src="zabbix.js"></script><script>
+const rows = [['srv-001', 'Linux servers'], ['srv-001', 'Web'], ['srv-002', 'Linux servers'], ['srv-010', 'Databases']]
+  .map(([h, g]) => '<tr><td>' + h + '</td><td>' + g + '</td><td>' + h + '</td><td>Server</td><td>Linux</td></tr>');
+writeTable('<th>Host</th><th>Group</th><th>Name</th><th>Type</th><th>OS</th>', rows);
+</script></main></body></html>

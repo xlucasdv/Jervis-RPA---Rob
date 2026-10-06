@@ -1,0 +1,8 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Sophos falso</title></head>
+<body><div id="app"></div><script src="../common/table.js"></script><script>
+const rows = Array.from({ length: 25 }, (_, i) => [
+  '<input type="checkbox">', 'PC-' + String(i + 1).padStart(3, '0'), 'Windows 11 Pro',
+  i % 5 === 0 ? 'Inativo' : 'Ativo', i % 7 === 0 ? 'Desatualizada' : 'Protegido', '06/10/2026 09:00', '10.0.0.' + (i + 1)]);
+renderTable({ headers: ['<input type="checkbox">', 'Nome ▲', 'SO', 'Integridade', 'Proteção', 'Última atividade', 'IP'], rows });
+</script></body></html>

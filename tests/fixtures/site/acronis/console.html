@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Imita o console da Acronis (SPA com rotas por fragmento: #/devices, #/activities).
+     Ao trocar de rota, a tabela anterior continua na tela por 800 ms, como em SPAs reais. -->
+<html><head><meta charset="utf-8"><title>Acronis falso</title></head>
+<body><div id="app"></div><script src="../common/table.js"></script><script>
+const now = new Date();
+const ago = h => new Date(now.getTime() - h * 3600e3);
+const pad = n => String(n).padStart(2, '0');
+// Dispositivos em inglês (formato americano com AM/PM); atividades em português (dd/mm/aaaa).
+const us = d => `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ${(d.getHours() % 12) || 12}:${pad(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+const br = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+const routes = {
+  '#/devices': () => renderTable({
+    headers: ['Name', 'Type', 'Status', 'Protection plan', 'Last backup', 'Next backup'],
+    rows: [
+      ['SRV-DC01', 'Server', 'OK', 'Diário', us(ago(3)), us(ago(-21))],
+      ['SRV-FS01', 'Server', 'Warning', 'Diário', us(ago(120)), us(ago(-21))],
+      ['PC-FIN-01', 'Workstation', 'Error', 'Diário', us(ago(2)), us(ago(-22))],
+      ['PC-RH-02', 'Workstation', 'Not protected', '—', 'Never', '—'],
+      ['PC-NEW-03', 'Workstation', 'OK', 'Diário', 'Never', us(ago(-1))],
+      ['VM-APP-04', 'Virtual machine', 'Warning', 'Diário', us(ago(1)), us(ago(-23))],
+    ],
+  }),
+  '#/activities': () => renderTable({
+    headers: ['Plano', 'Dispositivo', 'Início', 'Status', 'Duração', 'Tamanho', 'Mensagem'],
+    rows: [
+      ['Backup diário', 'SRV-DC01', br(ago(3)), 'Sucesso', '00:12:30', '1,5 GB', ''],
+      ['Backup diário', 'SRV-FS01', br(ago(120)), 'Sucesso', '00:40:00', '20 GB', ''],
+      ['Backup diário', 'PC-FIN-01', br(ago(2)), 'Falhou', '2 min', '0 B', 'Acesso negado ao volume C:'],
+      ['Backup diário', 'VM-APP-04', 'há 3 horas', 'Concluído com avisos', '1 h 5 min', '850 MB', 'VSS: snapshot lento'],
+      ['Backup semanal', 'SRV-DC01', br(ago(1)), 'Cancelado', '5 min', '120 MB', 'Cancelado pelo usuário'],
+      ['Backup diário', 'PC-NEW-03', br(ago(0)), 'Em andamento', '', '', ''],
+      ...[1, 2, 3, 4, 5, 6].map(i => ['Backup diário', `PC-OK-0${i}`, br(ago(i)), 'Sucesso', '3 min', `${i}00 MB`, '']),
+    ],
+  }),
+};
+const show = () => (routes[location.hash] || (() => { document.getElementById('app').innerHTML = '<p>Página inicial</p>'; }))();
+show();
+window.addEventListener('hashchange', () => setTimeout(show, 800));
+</script></body></html>

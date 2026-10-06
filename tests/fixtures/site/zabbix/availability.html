@@ -1,0 +1,9 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Zabbix falso</title></head>
+<body><main><script src="zabbix.js"></script><script>
+const rows = [['srv-010', 'Zabbix agent is not available', '2.5000%', '97.5000%'],
+  ['srv-020', 'MySQL is down', '0.0500%', '99.9500%'], ['srv-001', 'HTTP check failed', '0.0000%', '100.0000%'],
+  ['srv-007', 'High CPU utilization', '1.2000%', '98.8000%']]
+  .map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '<td><a href="#">Show</a></td></tr>');
+writeTable('<th>Host</th><th>Name</th><th>Problems</th><th>Ok</th><th>Graph</th>', rows);
+</script></main></body></html>
