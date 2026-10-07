@@ -25,8 +25,8 @@ py -3.12 -m venv .venv
 .venv\Scripts\python -m jervis report --open
 ```
 
-Em máquinas com política de controle de aplicativos, configure um driver do navegador aprovado antes
-([instalação](docs/instalacao.md#driver-do-navegador-em-máquinas-corporativas)).
+Em máquinas com política de controle de aplicativos, rode antes `jervis driver update --auto`, que baixa e
+mantém atualizado o driver do Edge ([instalação](docs/instalacao.md#driver-do-navegador-em-máquinas-corporativas)).
 
 ## Documentação
 
@@ -54,6 +54,7 @@ Em máquinas com política de controle de aplicativos, configure um driver do na
 | `jervis schedule list / install / uninstall / run / serve` | Agendamento (Agendador de Tarefas do Windows ou interno) |
 | `jervis platforms ...` / `credentials ...` | Cadastro das plataformas e das credenciais (cofre do sistema) |
 | `jervis login [plataformas]` | Testa só o login |
+| `jervis driver status / update [--auto]` | Versão do driver do Edge; baixa o compatível (e mantém atualizado) |
 | `jervis notify set-smtp-password / set-webhook / test` | Notificações por e-mail e Teams/Slack |
 | `jervis audit [--verify]` | Trilha de auditoria (quem coletou e quem alterou a configuração) |
 | `jervis config show` | Configuração efetiva (base + ambiente) |

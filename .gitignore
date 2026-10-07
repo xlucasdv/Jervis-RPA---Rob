@@ -8,6 +8,8 @@ logs/
 output/
 # Scripts gerados por "jervis schedule install" (caminhos desta máquina)
 agendamentos/
+# Driver do navegador baixado por "jervis driver update"
+drivers/
 .env
 # Configuração local do ambiente (use `jervis init` para gerar a partir do modelo)
 config/platforms.yaml

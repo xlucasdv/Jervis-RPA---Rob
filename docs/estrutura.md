@@ -32,6 +32,7 @@ src/jervis/
   logging_setup.py    log geral rotativo, com id da execução em cada linha
   errors.py           exceções e categorias de falha (IssueCategory)
   browser.py          criação do WebDriver (Edge/Chrome/Firefox, driver aprovado)
+  driver.py           versão do Edge e do msedgedriver; download verificado (assinatura) do driver compatível
   session.py          platform_session(): navegador autenticado, fechado ao final
   auth/
     profiles.py       seletores de login padrão por tipo de plataforma (LoginProfile)

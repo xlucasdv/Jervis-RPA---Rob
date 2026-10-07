@@ -20,7 +20,7 @@ from selenium.common.exceptions import WebDriverException
 from jervis import __version__
 from jervis.auth.mfa import is_valid_totp_secret, normalize_totp_secret
 from jervis.auth.profiles import SUPPORTED_KINDS
-from jervis import scheduling
+from jervis import driver, scheduling
 from jervis.audit import AuditLog
 from jervis.health import HEALTH_EXIT, compute_health
 from jervis.notify import SMTP_SECRET, WEBHOOK_SECRET, Notifier
@@ -70,6 +70,11 @@ EXIT_OK, EXIT_FAILURE = 0, 1
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Saída redirecionada para arquivo (agendamentos) usa a página de código do Windows: um caractere
+    # fora dela não pode derrubar a execução.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     parser = _build_parser()
     args = parser.parse_args(argv)
     if not hasattr(args, "handler"):
@@ -180,6 +185,16 @@ def _build_parser() -> argparse.ArgumentParser:
     cfg = sub.add_parser("config", help="configuração efetiva (base + ambiente)").add_subparsers(title="ações", metavar="<ação>", required=True)
     p = cfg.add_parser("show", help="mostra a configuração efetiva, já combinada com o arquivo do ambiente")
     p.set_defaults(handler=cmd_config_show)
+
+    # --- driver ---
+    drv = sub.add_parser("driver", help="driver do navegador (Edge): versão e atualização").add_subparsers(title="ações", metavar="<ação>", required=True)
+    p = drv.add_parser("status", help="compara a versão do Edge instalado com a do driver (código de saída 0/2)")
+    p.set_defaults(handler=cmd_driver_status)
+    p = drv.add_parser("update", help="baixa da Microsoft o driver da versão do Edge instalado, se necessário")
+    p.add_argument("--force", action="store_true", help="baixa de novo mesmo se a versão já estiver correta")
+    p.add_argument("--auto", action=argparse.BooleanOptionalAction, default=None,
+                   help="ativa (--auto) ou desativa (--no-auto) a atualização antes de cada coleta")
+    p.set_defaults(handler=cmd_driver_update)
 
     # --- check ---
     p = sub.add_parser("check", help="verifica login, páginas e colunas nas plataformas reais, sem coletar dados")
@@ -409,6 +424,7 @@ def cmd_login(args: argparse.Namespace, config: AppConfig) -> int:
     settings = config.settings
     if args.headed:
         settings.headless = False
+    _prepare_driver(config)
     store = _store(config)
     failures = 0
     for platform in platforms:
@@ -438,6 +454,7 @@ def cmd_check(args: argparse.Namespace, config: AppConfig) -> int:
     settings = config.settings
     if args.headed:
         settings.headless = False
+    _prepare_driver(config)
     directory = Path(settings.log_file).parent / "verificacao"
     screenshots = directory / "capturas" if args.screenshots else None
     store = _store(config)
@@ -814,6 +831,54 @@ def cmd_config_show(args: argparse.Namespace, config: AppConfig) -> int:
     print(f"# Ambiente: {config.environment or 'base'}   Arquivos: {sources}")
     print(f"# Cofre de credenciais: {service_for(config.environment)}")
     print(yaml.safe_dump(to_dict(config), allow_unicode=True, sort_keys=False).rstrip())
+    return EXIT_OK
+
+
+# --- driver do navegador --------------------------------------------------------------
+
+
+def _prepare_driver(config: AppConfig) -> None:
+    driver.prepare(config.settings, print, lambda event, **details: _audit(config, event, **details))
+
+
+def cmd_driver_status(args: argparse.Namespace, config: AppConfig) -> int:
+    settings = config.settings
+    if settings.browser != "edge":
+        print(f"Navegador configurado: {settings.browser}. A verificação do driver só está disponível para o Edge.")
+        return EXIT_OK
+    info = driver.status(settings)
+    origin = "settings.driver_path" if settings.driver_path else "padrão; settings.driver_path vazio"
+    print(f"Microsoft Edge instalado: {info.edge_version or 'não encontrado'}")
+    print(f"Driver: {info.path} ({origin})")
+    print(f"Versão do driver: {info.driver_version or 'não encontrado'}")
+    print(f"Atualização automática antes das coletas: {'ativa' if settings.driver_auto_update else 'desativada'}")
+    if info.compatible:
+        exact = "" if info.driver_version == info.edge_version else " (mesma versão principal)"
+        print(f"Situação: compatível{exact}.")
+        return EXIT_OK
+    print("Situação: INCOMPATÍVEL. Atualize com: jervis driver update")
+    return 2
+
+
+def cmd_driver_update(args: argparse.Namespace, config: AppConfig) -> int:
+    settings = config.settings
+    result = driver.update_for(settings, force=args.force)
+    if result.updated:
+        print(f"Driver atualizado: {result.previous or 'nenhum'} -> {result.current} (Edge {result.edge_version}) em {result.path}")
+        _audit(config, "driver_atualizado", de=result.previous, para=result.current, edge=result.edge_version, caminho=str(result.path))
+    else:
+        print(f"Driver já está na versão do Edge ({result.current}) em {result.path}.")
+    changes = {}
+    if not settings.driver_path:
+        settings.driver_path = changes["driver_path"] = result.path.as_posix()
+    if args.auto is not None and args.auto != settings.driver_auto_update:
+        settings.driver_auto_update = changes["driver_auto_update"] = args.auto
+    if changes:
+        save_config(config)
+        _audit(config, "configuracao_alterada", alteracoes=changes)
+        print("Configuração atualizada: " + ", ".join(f"{k} = {v}" for k, v in changes.items()))
+    if not settings.driver_auto_update:
+        print("Dica: 'jervis driver update --auto' faz essa verificação sozinha antes de cada coleta.")
     return EXIT_OK
 
 

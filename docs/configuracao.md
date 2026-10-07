@@ -21,6 +21,7 @@ notifications: {...}   # avisos por e-mail/webhook (opcional)
 |---|---|---|
 | `browser` | `edge` | `edge`, `chrome` ou `firefox` |
 | `driver_path` | vazio | Driver aprovado, quando o download automático é bloqueado ([instalação](instalacao.md)) |
+| `driver_auto_update` | `false` | Edge: confere o driver antes de cada coleta e baixa o da versão do Edge instalado (`jervis driver update --auto`) |
 | `headless` | `true` | `false` mostra o navegador (útil para investigar). Agendamentos sempre usam `true` |
 | `page_load_timeout` | `60` | Segundos para uma página carregar |
 | `login_timeout` | `30` | Segundos aguardando cada etapa do login |

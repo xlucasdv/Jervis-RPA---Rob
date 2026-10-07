@@ -72,7 +72,10 @@ referência. O limite é `settings.incomplete_drop_pct`.
 | Sintoma | O que fazer |
 |---|---|
 | `Uma política de Controle de Aplicativos bloqueou este arquivo` / `Unable to obtain driver` | Use um driver aprovado em `settings.driver_path` ([instalação](instalacao.md#driver-do-navegador-em-máquinas-corporativas)) |
-| `This version of Microsoft Edge WebDriver only supports Microsoft Edge version N` | O Edge foi atualizado: baixe o driver da nova versão |
+| `This version of Microsoft Edge WebDriver only supports Microsoft Edge version N` | O Edge foi atualizado: `jervis driver update` (e `--auto` para não acontecer de novo) |
+| `Atenção: não foi possível atualizar o driver do navegador (...)` | A coleta seguiu com o driver atual. Sem internet/proxy: libere `msedgedriver.microsoft.com` ou atualize manualmente |
+| `O driver baixado não tem uma assinatura válida da Microsoft` | O arquivo foi descartado e o driver atual mantido. Verifique proxy/antivírus que alterem downloads |
+| `Não foi possível substituir ...: o driver está em uso` | Uma coleta ou navegador da automação estava aberto; rode `jervis driver update` de novo depois |
 | `Driver não encontrado em settings.driver_path` | Caminho errado ou arquivo removido |
 | Relatório PDF `não gerado` | O PDF usa o mesmo navegador: resolva o driver; os outros formatos são gerados normalmente. Gere depois com `jervis report --formats pdf` |
 

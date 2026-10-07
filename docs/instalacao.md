@@ -27,7 +27,22 @@ bloqueado pela política de controle de aplicativos do Windows; o `python.exe` d
 
 Por padrão o Selenium baixa o driver na primeira execução usando o `selenium-manager.exe`. Em máquinas com
 **Controle de Aplicativos do Windows (App Control/WDAC)**, esse executável é bloqueado ("Uma política de
-Controle de Aplicativos bloqueou este arquivo"). Nesse caso:
+Controle de Aplicativos bloqueou este arquivo"). Nesse caso, com o Edge (recomendado):
+
+```powershell
+.venv\Scripts\python -m jervis driver update --auto
+```
+
+- Descobre a versão do Edge instalado, baixa o `msedgedriver.exe` correspondente de
+  `msedgedriver.microsoft.com` para `drivers\msedgedriver.exe` e grava `settings.driver_path`.
+- O arquivo só substitui o driver atual depois de conferidas a **assinatura digital da Microsoft** e a versão.
+- `--auto` liga `settings.driver_auto_update`: antes de cada coleta, verificação e login, a ferramenta confere
+  a versão e baixa o driver novo quando o Edge se atualiza (uma versão principal por mês). Se não conseguir
+  (sem internet, proxy), avisa e segue com o driver atual.
+- `jervis driver status` mostra as versões do Edge e do driver e se são compatíveis.
+- A pasta `drivers\` precisa ser gravável pelo usuário que roda as coletas agendadas.
+
+Sem acesso a `msedgedriver.microsoft.com`, faça manualmente:
 
 1. Descubra a versão do Edge: `(Get-Item "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe").VersionInfo.ProductVersion`
 2. Baixe o `msedgedriver.exe` da mesma versão em https://developer.microsoft.com/microsoft-edge/tools/webdriver/

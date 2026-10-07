@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
+from jervis import driver
 from jervis.audit import AuditLog, actor
 
 from jervis.collection import failed_stages, merge_retry, new_run_dir, run_collection, save_result
@@ -156,6 +157,7 @@ class Runner:
         collect: CollectFn = run_collection,
         sleep: Callable[[float], None] = time.sleep,
         notifier: Notifier | None = None,
+        driver_updater: Callable[[Settings], driver.DriverUpdate] = driver.update_for,
     ):
         self.config = config
         self.settings: Settings = config.settings
@@ -167,6 +169,7 @@ class Runner:
         self.audit = AuditLog(self.settings.audit_file, config.environment)
         self.notifier = notifier or Notifier(config.notifications, self.store)
         self._baseline: dict[str, dict[str, int]] = {}
+        self._driver_updater = driver_updater
 
     # --- execução (7.1 / 7.2) ---------------------------------------------------------
 
@@ -210,6 +213,8 @@ class Runner:
         runnable = [p for p in platforms if p.kind in COLLECTORS]
         for skipped in (p for p in platforms if p.kind not in COLLECTORS):
             self.emit(f"{skipped.name}: coleta não disponível para o tipo '{skipped.kind}' (ignorada).")
+        if runnable:
+            self._prepare_driver()
         for index, platform in enumerate(runnable, 1):
             self.emit(f"{platform.name} ({index}/{len(runnable)}): iniciando coleta")
             self._mark(manifest, platform.name, estado="em_andamento", inicio=now_iso())
@@ -260,6 +265,7 @@ class Runner:
             raise JervisError(f"Plataforma(s) sem resultado nesta execução: {', '.join(unknown)}.")
 
         retried = []
+        driver_ready = False
         for name in selected:
             previous = results[name]
             stages = failed_stages(previous)
@@ -271,6 +277,9 @@ class Runner:
             if platform is None or not platform.enabled:
                 self.emit(f"{name}: não está ativa na configuração atual; ignorada.")
                 continue
+            if not driver_ready:
+                self._prepare_driver()
+                driver_ready = True
             results[name] = self._retry_platform(platform, previous, stages, run_dir, manifest)
             retried.append(name)
 
@@ -283,6 +292,9 @@ class Runner:
         return self._finish_run(manifest, run_dir, list(results.values()), started, formats, origin="reprocessamento")
 
     # --- etapas ---------------------------------------------------------------------
+
+    def _prepare_driver(self) -> None:
+        driver.prepare(self.settings, self.emit, self.audit.record, self._driver_updater)
 
     def _collect_platform(self, platform: PlatformConfig, only: set[str] | None = None) -> CollectionResult:
         return self._collect(

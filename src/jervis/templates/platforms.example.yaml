@@ -8,6 +8,8 @@ settings:
   browser: edge              # edge | chrome | firefox
   driver_path: ""            # vazio = download automático; em máquinas com política de controle
                              # de aplicativos, informe um driver aprovado, ex.: C:/drivers/msedgedriver.exe
+  driver_auto_update: false  # true: antes de cada coleta, baixa da Microsoft o driver da versão do Edge
+                             # instalado (jervis driver update --auto); sem driver_path usa drivers/
   headless: true             # false para ver o navegador (útil para ajustar seletores)
   page_load_timeout: 60      # segundos
   login_timeout: 30          # segundos aguardando cada etapa do login

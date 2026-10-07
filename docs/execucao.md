@@ -119,6 +119,8 @@ jervis schedule run diaria           # executa um agendamento agora, exatamente 
   Propriedades da tarefa → "Executar estando o usuário conectado ou não" (o Windows pedirá a senha).
 - Execuções agendadas usam o navegador oculto e exigem `mfa: totp` (não há quem digite um código).
 - A saída de cada tarefa fica em `logs/agendamento-<nome>.log`.
+- Ative `jervis driver update --auto`: o Edge se atualiza sozinho e, sem isso, as coletas agendadas param
+  quando a versão principal muda ([instalação](instalacao.md#driver-do-navegador-em-máquinas-corporativas)).
 - Sem acesso ao Agendador de Tarefas (ou fora do Windows): `jervis schedule serve` mantém um agendador em
   primeiro plano com as mesmas regras.
 

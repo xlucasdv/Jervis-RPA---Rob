@@ -47,6 +47,9 @@ class Settings:
     # Caminho de um driver já aprovado (msedgedriver.exe, chromedriver.exe, geckodriver.exe).
     # Vazio: o Selenium Manager baixa o driver automaticamente.
     driver_path: str = ""
+    # Edge: confere o driver antes de cada coleta e baixa o da versão do navegador instalado
+    # (jervis driver update). Sem driver_path, usa drivers/msedgedriver.exe.
+    driver_auto_update: bool = False
     headless: bool = True
     page_load_timeout: int = 60
     login_timeout: int = 30
@@ -418,6 +421,9 @@ def _parse_settings(data: Any) -> Settings:
         value = getattr(settings, name)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0 or (upper and value > upper):
             raise ConfigError(f"settings.{name} deve ser um inteiro entre 0 e {upper or 'N'}.")
+    for name in ("driver_auto_update", "headless", "screenshot_on_failure"):
+        if not isinstance(getattr(settings, name), bool):
+            raise ConfigError(f"settings.{name} deve ser true ou false.")
     if not isinstance(settings.report_title, str) or not settings.report_title.strip():
         raise ConfigError("settings.report_title deve ser um texto.")
     return settings
