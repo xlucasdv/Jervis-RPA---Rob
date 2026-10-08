@@ -10,6 +10,8 @@ output/
 agendamentos/
 # Driver do navegador baixado por "jervis driver update"
 drivers/
+# Perfil próprio do navegador (settings.browser_profile): guarda cookies e sessões das plataformas
+perfil_navegador/
 .env
 # Configuração local do ambiente (use `jervis init` para gerar a partir do modelo)
 config/platforms.yaml

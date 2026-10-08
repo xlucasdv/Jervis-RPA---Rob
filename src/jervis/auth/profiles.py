@@ -58,12 +58,16 @@ PROFILES: dict[str, LoginProfile] = {
     ),
     # Acronis Cyber Protect Cloud: login em duas etapas (login → Avançar → senha).
     "acronis": LoginProfile(
-        username=("input[name='login']", "#login", "input[type='email']"),
+        # Tela real (br02-cloud, 2026): input[name='username'] visível + cópias ocultas com o mesmo nome,
+        # ignoradas porque só campos visíveis são usados.
+        username=("input[name='username']", "input[name='login']", "#login", "input[type='email']"),
         password=("input[name='password']", "input[type='password']"),
         submit=("button[type='submit']",),
         next=("button[type='submit']",),
         error=(".el-form-item__error", ".acv-alert-danger", *_GENERIC_ERRORS),
-        mfa_input=("input[name='totp']", "input[name='code']", "input[autocomplete='one-time-code']"),
+        # Tela real (/totp): campo numérico único para os 6 dígitos.
+        mfa_input=("input.el-totp-code-native", "input[name='totp']", "input[name='code']",
+                   "input[autocomplete='one-time-code']"),
         mfa_submit=("button[type='submit']",),
         success_url=(r"^https?://[^/]+/(ui|mc|services)/",),
     ),

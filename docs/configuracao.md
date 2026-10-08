@@ -21,6 +21,7 @@ notifications: {...}   # avisos por e-mail/webhook (opcional)
 |---|---|---|
 | `browser` | `edge` | `edge`, `chrome` ou `firefox` |
 | `driver_path` | vazio | Driver aprovado, quando o download automático é bloqueado ([instalação](instalacao.md)) |
+| `browser_profile` | vazio | Vazio: janela anônima e limpa a cada execução. Uma pasta (ex.: `perfil_navegador`): janela normal com perfil próprio, que guarda cookies e sessões entre execuções; ver nota abaixo |
 | `driver_auto_update` | `false` | Edge: confere o driver antes de cada coleta e baixa o da versão do Edge instalado (`jervis driver update --auto`) |
 | `headless` | `true` | `false` mostra o navegador (útil para investigar). Agendamentos sempre usam `true` |
 | `page_load_timeout` | `60` | Segundos para uma página carregar |
@@ -38,6 +39,18 @@ notifications: {...}   # avisos por e-mail/webhook (opcional)
 | `retention_days` | `90` | Pastas de execução mais antigas são removidas (0 = nunca) |
 | `incomplete_drop_pct` | `50` | Queda de registros, frente à última coleta, que gera aviso de dados incompletos |
 | `max_hours_without_success` | `26` | `jervis status` fica crítico se uma plataforma ativa passar disso sem sucesso |
+
+### Janela anônima ou normal (`browser_profile`)
+
+- **Vazio (padrão):** cada execução abre uma janela anônima e limpa. Nada fica salvo; todo login é feito do zero
+  (inclusive o MFA).
+- **Uma pasta** (ex.: `browser_profile: perfil_navegador`): janela normal com um perfil próprio da ferramenta,
+  separado do seu Edge pessoal. Cookies e sessões ficam salvos entre execuções: se a sessão ainda for válida, o
+  login é reaproveitado, e "Confiar neste navegador" no MFA vale para as próximas execuções.
+- **Atenção:** a pasta passa a guardar sessões abertas nas plataformas. Quem tiver acesso a ela, com o seu
+  usuário do Windows, pode reaproveitá-las. Ela está no `.gitignore` (`perfil_navegador/`); não a copie nem
+  compartilhe. Para "deslogar" tudo, apague a pasta.
+- Uma janela por vez usa o perfil: se outra execução estiver com ele aberto, a nova avisa e não inicia.
 
 ## `platforms`
 

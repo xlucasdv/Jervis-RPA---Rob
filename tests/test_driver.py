@@ -287,8 +287,9 @@ def test_cli_driver_update_error(project, monkeypatch, capsys):
 
 def test_invalid_auto_update_value(project):
     path = project / "platforms.yaml"
-    path.write_text(path.read_text(encoding="utf-8").replace("browser: edge", "browser: edge\n  driver_auto_update: sim"),
-                    encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    assert "driver_auto_update: false" in text
+    path.write_text(text.replace("driver_auto_update: false", "driver_auto_update: sim"), encoding="utf-8")
     assert cli.main(["-c", "platforms.yaml", "driver", "status"]) == 1
 
 

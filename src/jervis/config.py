@@ -20,6 +20,7 @@ import yaml
 
 from jervis.auth.profiles import SELECTOR_FIELDS, SUPPORTED_KINDS
 from jervis.errors import ConfigError
+from jervis.fileutil import replace
 
 ENV_CONFIG_PATH = "JERVIS_CONFIG"
 ENV_ENVIRONMENT = "JERVIS_ENV"
@@ -50,6 +51,9 @@ class Settings:
     # Edge: confere o driver antes de cada coleta e baixa o da versão do navegador instalado
     # (jervis driver update). Sem driver_path, usa drivers/msedgedriver.exe.
     driver_auto_update: bool = False
+    # Pasta de um perfil próprio do navegador (ex.: perfil_navegador): janela normal que guarda cookies e
+    # sessões entre execuções (ex.: "Confiar neste navegador" dispensa o MFA). Vazio: janela anônima e limpa.
+    browser_profile: str = ""
     headless: bool = True
     page_load_timeout: int = 60
     login_timeout: int = 30
@@ -424,6 +428,8 @@ def _parse_settings(data: Any) -> Settings:
     for name in ("driver_auto_update", "headless", "screenshot_on_failure"):
         if not isinstance(getattr(settings, name), bool):
             raise ConfigError(f"settings.{name} deve ser true ou false.")
+    if not isinstance(settings.browser_profile, str):
+        raise ConfigError("settings.browser_profile deve ser um caminho de pasta (ou vazio para janela anônima).")
     if not isinstance(settings.report_title, str) or not settings.report_title.strip():
         raise ConfigError("settings.report_title deve ser um texto.")
     return settings
@@ -554,7 +560,7 @@ def _atomic_yaml(target: Path, header: str, data: dict[str, Any]) -> Path:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
-        os.replace(tmp, target)
+        replace(tmp, target)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
