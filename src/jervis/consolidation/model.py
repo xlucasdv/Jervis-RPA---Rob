@@ -28,6 +28,7 @@ BACKUP_TASK = "tarefa_backup"               # Acronis: execuções de backup
 HOST = "host"                               # Zabbix: hosts monitorados
 MONITORING_PROBLEM = "problema_monitoramento"  # Zabbix: problemas e eventos
 AVAILABILITY = "disponibilidade"            # Zabbix: indicadores de disponibilidade
+ACTIVITY = "atividade"                      # Acronis (API): atividades e tarefas executadas nas máquinas
 COLLECTION = "coleta"                       # falhas da própria coleta, de qualquer plataforma
 
 REQUIRED_FIELDS = ("plataforma", "categoria", "recurso", "classificacao", "data_coleta")

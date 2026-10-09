@@ -13,12 +13,17 @@
 
 ## Passo a passo
 
+As dependências são gerenciadas com **uv** (`pyproject.toml` + `uv.lock`, versões travadas):
+
 ```powershell
 cd C:\Jervis3000
-py -3.12 -m venv .venv
-.venv\Scripts\python -m pip install -e ".[dev]"
+py -3.12 -m pip install --user uv          # uma vez por máquina (fora do ambiente virtual)
+py -3.12 -m uv sync                        # cria/atualiza o .venv com as versões do uv.lock (inclui o grupo dev)
 .venv\Scripts\python -m jervis --version
 ```
+
+- Adicionar uma dependência: `py -3.12 -m uv add <pacote>` (atualiza `pyproject.toml` e `uv.lock`).
+- Use `py -3.12 -m uv`, e não `uv` direto, se o executável não estiver no PATH.
 
 Use sempre `.venv\Scripts\python -m jervis ...`. O executável `jervis.exe` gerado pelo pip pode ser
 bloqueado pela política de controle de aplicativos do Windows; o `python.exe` do ambiente virtual não é.
@@ -52,6 +57,31 @@ Sem acesso a `msedgedriver.microsoft.com`, faça manualmente:
 4. Quando o Edge for atualizado, atualize também o driver (o erro "session not created: This version of
    Microsoft Edge WebDriver only supports..." indica versões diferentes).
 
+## Banco de dados e fila (MySQL e RabbitMQ)
+
+Os dois rodam em contêineres Docker (`docker-compose.yml`), acessíveis só desta máquina. As senhas não ficam em
+arquivo: são definidas no terminal antes de subir.
+
+```powershell
+$env:JERVIS_MYSQL_ROOT_PASSWORD = Read-Host "Senha root do MySQL" -MaskInput
+$env:JERVIS_MYSQL_PASSWORD      = Read-Host "Senha do usuário jervis no MySQL" -MaskInput
+$env:JERVIS_RABBITMQ_PASSWORD   = Read-Host "Senha do usuário jervis no RabbitMQ" -MaskInput
+docker compose up -d                                   # Docker Desktop precisa estar aberto
+```
+
+Depois, uma vez:
+
+```powershell
+.venv\Scripts\python -m jervis db set-credentials --username jervis   # a mesma senha de JERVIS_MYSQL_PASSWORD
+.venv\Scripts\python -m jervis db generate-key                        # chave que criptografa as chaves MFA
+.venv\Scripts\python -m jervis db init                                # cria as tabelas (também é automático)
+.venv\Scripts\python -m jervis db status
+```
+
+Inclua a seção `database` no arquivo de configuração ([configuração](configuracao.md#banco-de-dados-database)).
+Faça uma cópia segura da chave gerada por `db generate-key`: sem ela, as chaves MFA gravadas no banco não podem
+ser lidas.
+
 ## Primeira configuração
 
 ```powershell
@@ -72,7 +102,7 @@ se algo falhar.
 
 ```powershell
 cd C:\Jervis3000
-.venv\Scripts\python -m pip install -e ".[dev]"     # após atualizar o código-fonte
+py -3.12 -m uv sync                                 # após atualizar o código-fonte
 .venv\Scripts\python -m pytest -q                   # confere se tudo continua funcionando
 .venv\Scripts\python -m jervis check                # confere as plataformas reais
 ```

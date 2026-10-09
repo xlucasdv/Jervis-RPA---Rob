@@ -24,7 +24,7 @@ Onde cada feature do backlog está implementada e como verificá-la.
 | 5.3 Classificação | `consolidation/rules.py` | [plataformas.md](plataformas.md#padronização-e-consolidação) |
 | 5.4 Consolidação | `consolidation/consolidate.py` | `jervis consolidate` |
 | **6. Relatórios** | `reports/` | `tests/test_reports.py` |
-| 6.1 – 6.3 Consolidado, por plataforma, resumo executivo | `reports/data.py`, `templates/report.html.j2` | `jervis report --open` |
+| 6.1 – 6.3 Consolidado, por plataforma, resumo executivo | `reports/data.py`, `reports/slides.py`, `templates/slides.html.j2` | `jervis report --open` |
 | 6.4 Excel, CSV, PDF, HTML | `reports/excel.py`, `pdf.py`, `html.py`, CSV | `output/<execução>/relatorio.*` |
 | 6.5 Identificação visual | cores + ícones + rótulos por classificação | relatório HTML/PDF/Excel |
 | **7. Agendamento e execução** | `runner.py`, `scheduling.py` | `tests/test_runner.py`, `test_scheduling.py` |

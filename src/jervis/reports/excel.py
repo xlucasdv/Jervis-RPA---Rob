@@ -66,6 +66,8 @@ def _summary_sheet(ws: Worksheet, data: dict[str, Any]) -> None:
         ("Total de alertas", e["alertas"]["total"], "atencao" if e["alertas"]["ativos"] else None),
         ("Alertas ativos", e["alertas"]["ativos"], "atencao" if e["alertas"]["ativos"] else None),
         ("Problemas críticos", e["criticos"], "critico" if e["criticos"] else "normal"),
+        *([("Máquinas sem plano de backup", e["sem_backup"], "critico")] if e.get("sem_backup") else []),
+        *([("Máquinas com backup desatualizado", e["backup_desatualizado"], "critico")] if e.get("backup_desatualizado") else []),
         ("Backups com falha", "sem dados" if no_backups else e["backups_com_falha"],
          "falha_coleta" if no_backups else ("critico" if e["backups_com_falha"] else "normal")),
         ("Backups em atenção", "sem dados" if no_backups else e["backups_em_atencao"],

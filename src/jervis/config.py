@@ -69,6 +69,9 @@ class Settings:
     # Relatórios gerados ao fim de cada coleta (html, xlsx, csv, pdf).
     report_formats: list[str] = field(default_factory=lambda: ["html", "xlsx", "csv", "pdf"])
     report_title: str = "Relatório geral de TI"
+    # Identidade visual dos relatórios (padrão de apresentação): nome da empresa e logo (PNG/SVG/JPG; vazio = ícone + nome).
+    report_company: str = "Contego Security"
+    report_logo: str = ""
     # Auditoria e retenção (Épico 8).
     audit_file: str = "logs/auditoria.jsonl"
     retention_days: int = 90  # pastas de execução mais antigas são removidas (0 = nunca)
@@ -137,12 +140,24 @@ class NotificationConfig:
 
 
 @dataclass
+class DatabaseConfig:
+    """Conexão com o MySQL. Usuário e senha ficam no cofre (jervis db set-credentials) ou em
+    JERVIS_DATABASE_USERNAME / JERVIS_DATABASE_PASSWORD, nunca neste arquivo."""
+
+    host: str = "127.0.0.1"
+    port: int = 3306
+    name: str = "jervis3000"
+    connect_timeout: int = 10
+
+
+@dataclass
 class AppConfig:
     settings: Settings
     platforms: dict[str, PlatformConfig]
     path: Path | None = None
     schedules: dict[str, ScheduleConfig] = field(default_factory=dict)
     notifications: NotificationConfig | None = None
+    database: DatabaseConfig | None = None  # None = sem banco (as tabelas não são criadas)
     environment: str | None = None  # ex.: "hml"; None = configuração base
     overlay_path: Path | None = None  # arquivo do ambiente (platforms.<ambiente>.yaml)
     base_raw: dict[str, Any] | None = field(default=None, repr=False)  # conteúdo do arquivo base, para gravar só diferenças
@@ -290,7 +305,7 @@ def load_config(path: str | Path | None = None, env: str | None = None) -> AppCo
 def parse_config(raw: Any) -> AppConfig:
     if not isinstance(raw, dict):
         raise ConfigError("O arquivo de configuração deve conter um mapeamento YAML.")
-    _reject_unknown(raw, {"settings", "platforms", "schedules", "notifications"}, "raiz do arquivo")
+    _reject_unknown(raw, {"settings", "platforms", "schedules", "notifications", "database"}, "raiz do arquivo")
     settings = _parse_settings(raw.get("settings") or {})
     platforms_raw = raw.get("platforms") or {}
     if not isinstance(platforms_raw, dict):
@@ -301,7 +316,29 @@ def parse_config(raw: Any) -> AppConfig:
         raise ConfigError("'schedules' deve ser um mapeamento nome → agendamento.")
     schedules = {str(name): _parse_schedule(str(name), data or {}, platforms) for name, data in schedules_raw.items()}
     notifications = _parse_notifications(raw["notifications"]) if raw.get("notifications") else None
-    return AppConfig(settings=settings, platforms=platforms, schedules=schedules, notifications=notifications)
+    database = _parse_database(raw["database"]) if raw.get("database") else None
+    return AppConfig(settings=settings, platforms=platforms, schedules=schedules, notifications=notifications,
+                     database=database)
+
+
+_DB_NAME = re.compile(r"[A-Za-z0-9_]{1,64}")
+
+
+def _parse_database(data: Any) -> DatabaseConfig:
+    where = "database"
+    if not isinstance(data, dict):
+        raise ConfigError(f"'{where}' deve ser um mapeamento (host, port, name).")
+    _reject_unknown(data, {f.name for f in fields(DatabaseConfig)}, where)
+    db = DatabaseConfig(**data)
+    if not isinstance(db.host, str) or not db.host.strip():
+        raise ConfigError(f"{where}.host deve ser o endereço do servidor MySQL.")
+    if not isinstance(db.port, int) or isinstance(db.port, bool) or not 0 < db.port < 65536:
+        raise ConfigError(f"{where}.port deve ser uma porta entre 1 e 65535.")
+    if not isinstance(db.name, str) or not _DB_NAME.fullmatch(db.name):
+        raise ConfigError(f"{where}.name deve ter só letras, números e '_' (até 64 caracteres).")
+    if not isinstance(db.connect_timeout, int) or isinstance(db.connect_timeout, bool) or db.connect_timeout <= 0:
+        raise ConfigError(f"{where}.connect_timeout deve ser um inteiro positivo (segundos).")
+    return db
 
 
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
@@ -430,6 +467,10 @@ def _parse_settings(data: Any) -> Settings:
             raise ConfigError(f"settings.{name} deve ser true ou false.")
     if not isinstance(settings.browser_profile, str):
         raise ConfigError("settings.browser_profile deve ser um caminho de pasta (ou vazio para janela anônima).")
+    if not isinstance(settings.report_company, str) or not settings.report_company.strip():
+        raise ConfigError("settings.report_company deve ser o nome da empresa exibido nos relatórios.")
+    if not isinstance(settings.report_logo, str):
+        raise ConfigError("settings.report_logo deve ser o caminho de uma imagem (ou vazio).")
     if not isinstance(settings.report_title, str) or not settings.report_title.strip():
         raise ConfigError("settings.report_title deve ser um texto.")
     return settings
@@ -502,6 +543,8 @@ def to_dict(config: AppConfig) -> dict[str, Any]:
             "when": n.when, "webhook": n.webhook, "webhook_format": n.webhook_format,
             **({"email": {f.name: getattr(n.email, f.name) for f in fields(EmailConfig)}} if n.email else {}),
         }
+    if config.database:
+        data["database"] = {f.name: getattr(config.database, f.name) for f in fields(DatabaseConfig)}
     if config.schedules:
         data["schedules"] = {
             name: {f.name: getattr(s, f.name) for f in fields(ScheduleConfig) if f.name != "name"}

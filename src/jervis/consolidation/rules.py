@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from jervis.collectors.table import normalize_label
 from jervis.consolidation.model import (
+    ACTIVITY,
     ATTENTION,
     AVAILABILITY,
     BACKUP_PROTECTION,
@@ -226,6 +227,89 @@ def acronis_task(row: dict[str, Any], ctx: Context) -> StandardRecord:
     )
 
 
+# --- Acronis por API (conjuntos maquinas, alertas, atividades) --------------------------
+
+_ACRONIS_SECURITY_CATEGORIES = ("url filtering", "antimalware", "detection and response", "device control",
+                                "vulnerability", "patch", "email")
+_ACRONIS_SEVERITY = {"critical": "critica", "error": "alta", "warning": "media", "information": "informativa"}
+
+
+NO_BACKUP_PLAN, STALE_BACKUP = "Sem plano de backup.", "Backup desatualizado."
+
+
+def acronis_machine(row: dict[str, Any], ctx: Context) -> StandardRecord:
+    status, label = row.get("status"), row.get("status_label") or row.get("status")
+    notes = [] if row.get("tem_backup") else [NO_BACKUP_PLAN]
+    backup_problem = None
+    if row.get("tem_backup"):
+        last = row.get("ultimo_backup_iso")
+        days = _older_than(last, ctx, timedelta(days=ctx.options.stale_device_days))
+        if not last:
+            backup_problem = "Plano de backup aplicado, mas nenhum backup concluído"
+        elif days is not None:
+            backup_problem = f"Último backup há {days} dias"
+        if backup_problem:
+            notes.append(STALE_BACKUP)
+    if backup_problem:
+        classification, message = CRITICAL, backup_problem
+    elif status in ("critical", "error", "not_protected"):
+        classification, message = CRITICAL, {"critical": "Proteção em estado crítico", "error": "Plano de proteção com erro",
+                                             "not_protected": "Máquina não protegida"}[status]
+    elif row.get("online") is False:
+        classification, message = UNAVAILABLE, "Máquina offline"
+    elif status in ("warning", "no_policies_applied"):
+        classification, message = ATTENTION, label
+    else:
+        classification, message = NORMAL, None
+    status_text = _join(label, "online" if row.get("online") else "offline" if row.get("online") is False else None)
+    return record(
+        ctx, ENDPOINT, row.get("nome"), classification, status=status_text,
+        mensagem=_join(message, f"Planos: {row['planos']}" if row.get("planos") else None),
+        data_evento=row.get("ultimo_backup_iso"), observacoes=notes, chave=(row.get("id") or row.get("nome"),),
+    )
+
+
+def acronis_alert(row: dict[str, Any], ctx: Context) -> StandardRecord:
+    severity = row.get("severidade")
+    category = SECURITY_ALERT if matches(row.get("categoria"), _ACRONIS_SECURITY_CATEGORIES) else MONITORING_PROBLEM
+    notes = []
+    if row.get("mitigado"):
+        classification = NORMAL
+        notes.append("Ameaça mitigada.")
+    elif severity == "critical":
+        classification = CRITICAL
+    elif severity in ("error", "warning"):
+        classification = ATTENTION
+    elif severity == "information":
+        classification = NORMAL
+    else:
+        classification = ATTENTION
+        notes.append(f"Severidade não reconhecida: '{severity}'.")
+    return record(
+        ctx, category, row.get("dispositivo"), classification,
+        status=row.get("categoria"), mensagem=_join(row.get("titulo"), row.get("detalhe")),
+        severidade=_ACRONIS_SEVERITY.get(severity), data_evento=row.get("data_hora_iso"),
+        chave=(row.get("dispositivo"), row.get("tipo"), row.get("data_hora_iso")),
+        observacoes=notes, recurso_padrao_plataforma=True, derivar_severidade=False,
+    )
+
+
+def acronis_activity(row: dict[str, Any], ctx: Context) -> StandardRecord:
+    result = row.get("resultado")
+    if result in ("error", "timedout", "abandoned"):
+        classification = ATTENTION
+    elif result == "warning":
+        classification = ATTENTION
+    else:  # ok, cancelado ou em andamento
+        classification = NORMAL
+    return record(
+        ctx, ACTIVITY, row.get("dispositivo"), classification,
+        status=row.get("resultado_label"), mensagem=_join(row.get("titulo"), row.get("erro")),
+        data_evento=row.get("fim_iso") or row.get("inicio_iso"),
+        chave=(row.get("dispositivo"), row.get("tipo"), row.get("inicio_iso")), recurso_padrao_plataforma=True,
+    )
+
+
 # --- Zabbix ---------------------------------------------------------------------------
 
 _ZABBIX_SEVERITY = {
@@ -321,6 +405,9 @@ MAPPERS: dict[tuple[str, str], Mapper] = {
     ("sophos", "alertas"): sophos_alert,
     ("acronis", "dispositivos"): acronis_device,
     ("acronis", "tarefas"): acronis_task,
+    ("acronis", "maquinas"): acronis_machine,
+    ("acronis", "alertas"): acronis_alert,
+    ("acronis", "atividades"): acronis_activity,
     ("zabbix", "hosts"): zabbix_host,
     ("zabbix", "problemas"): zabbix_problem,
     ("zabbix", "disponibilidade"): zabbix_availability,

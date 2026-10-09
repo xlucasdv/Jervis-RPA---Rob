@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Relatório Executivo – {{ e.cliente }} – {{ e.competencia }}</title>
+<style>
+  @page { size: A4; margin: 16mm 16mm 18mm 16mm; }
+  :root { --ink: #1d1530; --muted: #5d5670; --line: #ddd7ea; --brand: #160d2e; --accent: #6c3fd1; --soft: #f5f2fb;
+          --red: #c62828; --yellow: #b26a00; --green: #2e7d32; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Calibri, Arial, sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.5; margin: 0;
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page { max-width: 178mm; margin: 0 auto; }
+  @media screen { body { background: #ece8f4; } .page { background: #fff; padding: 16mm; margin: 16px auto; box-shadow: 0 2px 12px #0002; } }
+  .masthead { background: var(--brand); color: #fff; border-radius: 6px; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; }
+  .masthead img { height: 40px; }
+  .masthead .brand { font-weight: 800; letter-spacing: .2em; font-size: 15pt; }
+  .masthead .tag { color: #c9b8f5; font-size: 9pt; text-align: right; }
+  h1 { font-family: Cambria, Georgia, serif; font-size: 20pt; line-height: 1.2; margin: 18px 0 4px; color: var(--brand); }
+  .client { font-size: 15pt; font-weight: 800; color: var(--accent); letter-spacing: .04em; }
+  .meta { color: var(--muted); margin: 4px 0 6px; }
+  h2 { font-family: Cambria, Georgia, serif; font-size: 14pt; color: var(--brand); border-bottom: 2px solid var(--accent);
+       padding-bottom: 3px; margin: 22px 0 10px; break-after: avoid; }
+  h3 { font-size: 11pt; margin: 14px 0 6px; color: var(--accent); break-after: avoid; }
+  p { margin: 0 0 9px; text-align: justify; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 9.5pt; break-inside: auto; }
+  tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  .panel.keep { break-inside: avoid; }
+  th { background: var(--brand); color: #fff; text-align: left; padding: 6px 8px; font-weight: 600; }
+  td { border-bottom: 1px solid var(--line); padding: 5px 8px; vertical-align: top; }
+  tr:nth-child(even) td { background: var(--soft); }
+  td.value { font-weight: 700; white-space: nowrap; width: 18%; }
+  td.ind { width: 32%; }
+  .note { color: var(--muted); font-size: 9.5pt; margin: -2px 0 10px; text-align: justify; }
+  .crit { display: inline-block; min-width: 54px; text-align: center; padding: 2px 8px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 8.5pt; }
+  .crit.alta { background: var(--red); } .crit.media { background: var(--yellow); } .crit.baixa { background: var(--green); }
+  .status-pendente { color: var(--yellow); font-weight: 700; } .status-resolvida { color: var(--green); font-weight: 700; }
+  .melhora { color: var(--green); font-weight: 600; } .piora { color: var(--red); font-weight: 600; } .estável { color: var(--muted); }
+  .point h3 { color: var(--brand); }
+  .footer { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 8px; color: var(--muted); font-size: 9pt; display: flex; justify-content: space-between; }
+  .limits { background: var(--soft); border-left: 3px solid var(--accent); padding: 8px 12px; font-size: 9pt; color: var(--muted); margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="masthead">
+    {% if e.logo %}<img src="{{ e.logo }}" alt="{{ e.empresa }}">{% else %}<span class="brand">{{ e.empresa | upper }}</span>{% endif %}
+    <div class="tag">Serviços Gerenciados de Segurança</div>
+  </div>
+  <h1>Relatório Executivo Mensal de Segurança e Monitoramento</h1>
+  <div class="client">{{ e.cliente | upper }}</div>
+  <div class="meta">Competência: {{ e.competencia }} &nbsp;|&nbsp; Emitido em: {{ e.emitido }}</div>
+
+  <h2>Sumário Executivo</h2>
+  {% for p in e.sumario %}<p>{{ p }}</p>{% endfor %}
+
+  <h2>Painel de Indicadores-Chave</h2>
+  <p class="note">Indicadores referentes a {{ e.competencia | lower }}, com base nos consoles monitorados pela {{ e.empresa }}.</p>
+  {% for painel in e.paineis %}
+  <div class="panel{% if painel.linhas | length <= 12 %} keep{% endif %}">
+  <h3>{{ painel.titulo }}</h3>
+  <table>
+    <thead><tr><th>Indicador</th><th>Valor</th><th>Leitura</th></tr></thead>
+    <tbody>{% for ind, valor, leitura in painel.linhas %}<tr><td class="ind">{{ ind }}</td><td class="value">{{ valor }}</td><td>{{ leitura }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% if painel.nota %}<div class="note">{{ painel.nota }}</div>{% endif %}
+  </div>
+  {% endfor %}
+
+  {% if e.pontos %}
+  <h2>Pontos de Atenção e Contexto de Risco</h2>
+  {% for ponto in e.pontos %}
+  <div class="point"><h3>{{ loop.index }}. {{ ponto.titulo }}</h3><p>{{ ponto.texto }}</p></div>
+  {% endfor %}
+  {% endif %}
+
+  {% if e.recomendacoes %}
+  <h2>Recomendações Priorizadas</h2>
+  <table>
+    <thead><tr><th>Criticidade</th><th>Ponto de atenção</th><th>Ação recomendada</th></tr></thead>
+    {% for r in e.recomendacoes %}<tr><td><span class="crit {{ r.criticidade }}">{{ r.rotulo }}</span></td><td>{{ r.ponto }}</td><td>{{ r.acao }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+
+  <h2>Evolução Mensal</h2>
+  {% if e.evolucao %}
+  <table>
+    <thead><tr><th>Indicador</th><th>{{ e.periodo_anterior or "Período anterior" }}</th><th>{{ e.competencia }}</th><th>Leitura</th></tr></thead>
+    {% for r in e.evolucao %}<tr><td>{{ r.indicador }}</td><td>{{ r.anterior | num }}</td><td>{{ r.atual | num }}</td><td class="{{ r.leitura }}">{{ r.leitura | capitalize }}</td></tr>{% endfor %}
+  </table>
+  {% else %}
+  <p>Este é o primeiro relatório deste cliente gerado pela ferramenta; os indicadores deste mês servem de linha de base para a comparação a partir do próximo ciclo.</p>
+  {% endif %}
+
+  <h2>Acompanhamento de Recomendações Anteriores</h2>
+  {% if e.acompanhamento %}
+  <table>
+    <thead><tr><th>Recomendação</th><th>Status</th><th>Observação</th></tr></thead>
+    {% for f in e.acompanhamento %}<tr><td>{{ f.recomendacao }}</td><td class="status-{{ f.status | lower }}">{{ f.status }}</td><td>{{ f.observacao }}</td></tr>{% endfor %}
+  </table>
+  {% else %}
+  <p>Sem recomendações de ciclo anterior registradas para acompanhamento.</p>
+  {% endif %}
+
+  <h2>Considerações Finais</h2>
+  <p>{{ e.consideracoes }}</p>
+
+  {% if e.avisos %}
+  <div class="limits"><b>Limitações da coleta:</b> {% for a in e.avisos %}{{ a }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+  {% endif %}
+  <div class="footer"><span>{{ e.empresa }} — Serviços Gerenciados de Segurança</span>
+    <span>{% if e.por_ia %}Texto redigido com apoio de IA a partir dos indicadores coletados{% else %}Gerado automaticamente a partir dos indicadores coletados{% endif %}</span></div>
+</div>
+</body>
+</html>

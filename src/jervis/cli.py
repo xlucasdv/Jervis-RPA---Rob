@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
 import json
 import logging
@@ -20,7 +21,9 @@ from selenium.common.exceptions import WebDriverException
 from jervis import __version__
 from jervis.auth.mfa import is_valid_totp_secret, normalize_totp_secret
 from jervis.auth.profiles import SUPPORTED_KINDS
-from jervis import driver, scheduling
+from jervis import db, driver, scheduling
+from jervis.db import crypto, repository
+from jervis.api import ApiError, credentials as api_credentials
 from jervis.audit import AuditLog
 from jervis.health import HEALTH_EXIT, compute_health
 from jervis.notify import SMTP_SECRET, WEBHOOK_SECRET, Notifier
@@ -30,6 +33,7 @@ from jervis.consolidation import latest_run_dir, load_run
 from jervis.consolidation.consolidate import CONSOLIDATED_JSON
 
 from jervis.config import (
+    FORBIDDEN_KEYS,
     MFA_METHODS,
     REPORT_FORMATS,
     AppConfig,
@@ -87,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_init(args)
         config = load_config(args.config, env=args.env)
         setup_logging(config.settings.log_file, verbose=args.verbose)
+        if config.database and args.handler not in _DB_SETUP_COMMANDS:
+            _ensure_tables(config)
         return args.handler(args, config)
     except JervisError as exc:
         print(f"Erro: {redact(str(exc))}", file=sys.stderr)
@@ -172,6 +178,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.set_defaults(handler=cmd_status)
 
     # --- notify ---
+    ia = sub.add_parser("ia", help="redação do relatório executivo pela IA (Claude)").add_subparsers(title="ações", metavar="<ação>", required=True)
+    p = ia.add_parser("set-key", help="cadastra a chave da API do Claude no cofre do sistema")
+    p.set_defaults(handler=cmd_ia_set_key)
+    p = ia.add_parser("delete-key", help="remove a chave da API do Claude do cofre")
+    p.set_defaults(handler=cmd_ia_delete_key)
+
     notify = sub.add_parser("notify", help="notificações por e-mail e webhook").add_subparsers(title="ações", metavar="<ação>", required=True)
     p = notify.add_parser("set-smtp-password", help="cadastra a senha do SMTP no cofre do sistema")
     p.set_defaults(handler=cmd_notify_set_smtp_password)
@@ -185,6 +197,115 @@ def _build_parser() -> argparse.ArgumentParser:
     cfg = sub.add_parser("config", help="configuração efetiva (base + ambiente)").add_subparsers(title="ações", metavar="<ação>", required=True)
     p = cfg.add_parser("show", help="mostra a configuração efetiva, já combinada com o arquivo do ambiente")
     p.set_defaults(handler=cmd_config_show)
+
+    # --- db ---
+    dbp = sub.add_parser("db", help="banco de dados (MySQL): tabelas, credenciais e chave de criptografia").add_subparsers(
+        title="ações", metavar="<ação>", required=True)
+    p = dbp.add_parser("init", help="cria o banco e as tabelas que ainda não existem")
+    p.set_defaults(handler=cmd_db_init)
+    p = dbp.add_parser("status", help="testa a conexão e mostra as tabelas e a quantidade de linhas")
+    p.set_defaults(handler=cmd_db_status)
+    p = dbp.add_parser("set-credentials", help="cadastra usuário e senha do MySQL no cofre (a senha é pedida de forma oculta)")
+    p.add_argument("--username", help="usuário do MySQL (se omitido, será perguntado)")
+    p.set_defaults(handler=cmd_db_set_credentials)
+    p = dbp.add_parser("generate-key", help="gera a chave que criptografa as chaves MFA guardadas no banco (fica no cofre)")
+    p.add_argument("--force", action="store_true", help="substitui a chave existente (as chaves MFA já gravadas ficam ilegíveis)")
+    p.set_defaults(handler=cmd_db_generate_key)
+
+    # --- customers / services (cadastro no banco) ---
+    cust = sub.add_parser("customers", help="clientes no banco e os serviços de cada um").add_subparsers(
+        title="ações", metavar="<ação>", required=True)
+    p = cust.add_parser("add", help="cadastra um cliente")
+    p.add_argument("name", help="nome do cliente")
+    p.add_argument("--desk-manager-id", help="id do cliente no Desk Manager")
+    p.set_defaults(handler=cmd_customers_add)
+    p = cust.add_parser("list", help="lista os clientes e os serviços vinculados")
+    p.set_defaults(handler=cmd_customers_list)
+    p = cust.add_parser("show", help="detalhes de um cliente")
+    p.add_argument("customer", help="id, id do Desk Manager ou nome")
+    p.set_defaults(handler=cmd_customers_show)
+    p = cust.add_parser("update", help="altera nome ou id do Desk Manager")
+    p.add_argument("customer", help="id, id do Desk Manager ou nome")
+    p.add_argument("--name", help="novo nome")
+    p.add_argument("--desk-manager-id", help="novo id do Desk Manager (vazio \"\" remove)")
+    p.set_defaults(handler=cmd_customers_update)
+    p = cust.add_parser("remove", help="remove o cliente e os vínculos dele (inclusive as chaves MFA)")
+    p.add_argument("customer", help="id, id do Desk Manager ou nome")
+    p.add_argument("--yes", action="store_true", help="não pede confirmação")
+    p.set_defaults(handler=cmd_customers_remove)
+    p = cust.add_parser("link", help="vincula o cliente a um serviço (ou atualiza o vínculo)")
+    p.add_argument("customer", help="id, id do Desk Manager ou nome")
+    p.add_argument("service", help="slug do serviço (ex.: acronis)")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--mfa", action="store_true", help="pede a chave MFA (segredo TOTP) de forma oculta e grava criptografada")
+    group.add_argument("--clear-mfa", action="store_true", help="apaga a chave MFA do vínculo")
+    p.add_argument("--external-name", help="nome ou identificador do cliente na plataforma (vazio \"\" = usa o nome do cadastro)")
+    p.add_argument("--products", help="produtos contratados, separados por ';' (vazio \"\" apaga)")
+    p.add_argument("--contracted", type=int, help="quantidade de dispositivos contratados (0 apaga)")
+    p.set_defaults(handler=cmd_customers_link)
+    p = cust.add_parser("report", help="relatório geral do cliente coletado por API (Acronis e Zabbix)")
+    p.add_argument("customer", nargs="?", help="id, id do Desk Manager ou nome")
+    p.add_argument("--all", dest="all_customers", action="store_true",
+                   help="todos os clientes vinculados a Acronis ou Zabbix, um após o outro")
+    period = p.add_mutually_exclusive_group()
+    period.add_argument("--month", help="mês AAAA-MM (padrão: o mês atual, até hoje)")
+    period.add_argument("--days", type=int, help="em vez do mês: últimos N dias")
+    p.add_argument("--notes", help="arquivo YAML com destaques, notas e recomendações da equipe "
+                                   "(padrão: notas/<cliente>/<AAAA-MM>.yaml, se existir)")
+    p.add_argument("--formats", help="formatos separados por vírgula (html,xlsx,csv,pdf); padrão: settings.report_formats")
+    p.add_argument("--open", action="store_true", help="abre o relatório HTML ao terminar")
+    p.add_argument("--ia", action="store_true", help="texto do relatório executivo redigido pela IA (Claude); "
+                                                     "números conferidos com os dados, senão usa o texto padrão")
+    p.set_defaults(handler=cmd_customers_report)
+    p = cust.add_parser("unlink", help="desvincula o cliente de um serviço (apaga a chave MFA do vínculo)")
+    p.add_argument("customer", help="id, id do Desk Manager ou nome")
+    p.add_argument("service", help="slug do serviço")
+    p.set_defaults(handler=cmd_customers_unlink)
+
+    svc = sub.add_parser("services", help="serviços (plataformas) no banco e suas configurações").add_subparsers(
+        title="ações", metavar="<ação>", required=True)
+    p = svc.add_parser("add", help="cadastra um serviço")
+    p.add_argument("slug", help="identificador curto (ex.: acronis)")
+    p.add_argument("--url", required=True, help="endereço da plataforma")
+    p.add_argument("--class", dest="class_identifier", required=True,
+                   help=f"coletor: {', '.join(sorted(COLLECTORS))} ou caminho Python (pacote.modulo.Classe)")
+    p.add_argument("--set", action="append", default=[], metavar="CHAVE=VALOR", help="configuração extra (repetível), ex.: mfa=totp")
+    p.set_defaults(handler=cmd_services_add)
+    p = svc.add_parser("list", help="lista os serviços")
+    p.set_defaults(handler=cmd_services_list)
+    p = svc.add_parser("update", help="altera url, classe ou configurações")
+    p.add_argument("slug")
+    p.add_argument("--url")
+    p.add_argument("--class", dest="class_identifier")
+    p.add_argument("--set", action="append", default=[], metavar="CHAVE=VALOR", help="inclui/altera uma configuração (repetível)")
+    p.add_argument("--unset", action="append", default=[], metavar="CHAVE", help="remove uma configuração (repetível)")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--mfa", action="store_true", help="pede a chave MFA da conta de parceiro (oculta) e grava criptografada")
+    group.add_argument("--clear-mfa", action="store_true", help="apaga a chave MFA da conta de parceiro")
+    p.set_defaults(handler=cmd_services_update)
+    p = svc.add_parser("set-api-credentials", help="credenciais de API do serviço no cofre (Acronis: client id/secret; "
+                                                    "Zabbix: token; Desk Manager: chaves do Operador e do Ambiente)")
+    p.add_argument("slug")
+    p.set_defaults(handler=cmd_services_set_api_credentials)
+    p = svc.add_parser("test-api", help="testa o acesso por API do serviço (só leitura)")
+    p.add_argument("slug")
+    p.set_defaults(handler=cmd_services_test_api)
+    p = svc.add_parser("clients", help="clientes que existem na plataforma (Acronis: clientes; Zabbix: grupos de hosts) "
+                                        "e a situação de cada um no cadastro")
+    p.add_argument("slug")
+    p.add_argument("--import", dest="do_import", action="store_true",
+                   help="cadastra os que faltam e cria o vínculo com o serviço")
+    p.add_argument("--only", action="append", default=[], metavar="NOME",
+                   help="só estes clientes da plataforma (repetível)")
+    p.add_argument("--yes", action="store_true", help="não pede confirmação ao importar")
+    p.set_defaults(handler=cmd_services_clients)
+    p = svc.add_parser("set-credentials", help="usuário e senha da conta de parceiro no cofre do sistema (senha oculta)")
+    p.add_argument("slug")
+    p.add_argument("--username", help="usuário (se omitido, será perguntado)")
+    p.set_defaults(handler=cmd_services_set_credentials)
+    p = svc.add_parser("remove", help="remove um serviço sem clientes vinculados")
+    p.add_argument("slug")
+    p.set_defaults(handler=cmd_services_remove)
 
     # --- driver ---
     drv = sub.add_parser("driver", help="driver do navegador (Edge): versão e atualização").add_subparsers(title="ações", metavar="<ação>", required=True)
@@ -790,6 +911,27 @@ def cmd_status(args: argparse.Namespace, config: AppConfig) -> int:
     return HEALTH_EXIT[status["saude"]]
 
 
+def cmd_ia_set_key(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.reports.ai import API_KEY_SECRET
+
+    key = getpass.getpass("Chave da API do Claude (não será exibida): ").strip()
+    if not key.startswith("sk-ant-"):
+        raise CredentialError("Chave inválida (esperado texto iniciado por sk-ant-). Nada foi alterado.")
+    _store(config).set_secret(API_KEY_SECRET, key)
+    _audit(config, "ia_chave_cadastrada")
+    print("Chave da API do Claude gravada no cofre. Use: jervis customers report <cliente> --ia")
+    return EXIT_OK
+
+
+def cmd_ia_delete_key(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.reports.ai import API_KEY_SECRET
+
+    removed = _store(config).delete_secret(API_KEY_SECRET)
+    _audit(config, "ia_chave_removida")
+    print("Chave removida do cofre." if removed else "Não havia chave cadastrada.")
+    return EXIT_OK
+
+
 def cmd_notify_set_smtp_password(args: argparse.Namespace, config: AppConfig) -> int:
     password = getpass.getpass("Senha do SMTP: ")
     if not password or password != getpass.getpass("Confirme a senha: "):
@@ -832,6 +974,456 @@ def cmd_config_show(args: argparse.Namespace, config: AppConfig) -> int:
     print(f"# Cofre de credenciais: {service_for(config.environment)}")
     print(yaml.safe_dump(to_dict(config), allow_unicode=True, sort_keys=False).rstrip())
     return EXIT_OK
+
+
+# --- banco de dados ----------------------------------------------------------------------
+
+
+def _ensure_tables(config: AppConfig) -> None:
+    """Ponto de entrada: cria as tabelas que não existem. Banco fora do ar não impede os demais comandos."""
+    try:
+        created = db.ensure_schema(config.database, _store(config))
+    except db.DatabaseError as exc:
+        print(f"Atenção: tabelas do banco não verificadas: {redact(str(exc))}", file=sys.stderr)
+        return
+    if created:
+        print(f"Estrutura do banco '{config.database.name}' atualizada: {', '.join(created)}")
+        _audit(config, "banco_tabelas_criadas", banco=config.database.name, tabelas=created)
+
+
+def _require_database(config: AppConfig):
+    if not config.database:
+        raise ConfigError("Banco não configurado: inclua a seção 'database' (host, port, name) no arquivo de configuração.")
+    return config.database
+
+
+def cmd_db_init(args: argparse.Namespace, config: AppConfig) -> int:
+    database = _require_database(config)
+    created = db.ensure_schema(database, _store(config))
+    if created:
+        _audit(config, "banco_tabelas_criadas", banco=database.name, tabelas=created)
+    print(f"Banco '{database.name}' em {database.host}:{database.port}: "
+          + (f"criado: {', '.join(created)}." if created else "tabelas e colunas já existiam."))
+    return EXIT_OK
+
+
+def cmd_db_status(args: argparse.Namespace, config: AppConfig) -> int:
+    database = _require_database(config)
+    status = db.table_status(database, _store(config))
+    print(f"Conexão OK: {database.host}:{database.port}, banco '{database.name}'.")
+    _print_table(["TABELA", "LINHAS"], [[name, "não existe" if n is None else str(n)] for name, n in status.items()])
+    store = _store(config)
+    try:
+        crypto.load_key(store)
+        print("Chave de criptografia da chave MFA: cadastrada.")
+    except crypto.EncryptionKeyError:
+        print("Chave de criptografia da chave MFA: ausente (jervis db generate-key).")
+    return EXIT_OK
+
+
+def cmd_db_set_credentials(args: argparse.Namespace, config: AppConfig) -> int:
+    username = args.username or input("Usuário do MySQL: ").strip()
+    password = getpass.getpass("Senha do MySQL: ")
+    if not username or not password or password != getpass.getpass("Confirme a senha: "):
+        raise CredentialError("Usuário vazio ou senhas que não conferem. Nada foi alterado.")
+    store = _store(config)
+    store.set(db.CREDENTIALS_NAME, username, password)
+    _audit(config, "banco_credencial_cadastrada", usuario=mask_username(username))
+    print(f"Credenciais do banco salvas no cofre do sistema ({store.backend_name()}).")
+    if store.status(db.CREDENTIALS_NAME).source == "env":
+        print(f"Atenção: as variáveis {env_prefix(db.CREDENTIALS_NAME)}* estão definidas e têm prioridade sobre o cofre.")
+    return EXIT_OK
+
+
+def cmd_db_generate_key(args: argparse.Namespace, config: AppConfig) -> int:
+    store = _store(config)
+    if store.get_secret(crypto.VAULT_KEY) and not args.force:
+        raise ConfigError("Já existe uma chave de criptografia no cofre. Substituí-la deixa ilegíveis as chaves MFA já "
+                          "gravadas no banco; se for isso mesmo, use --force.")
+    store.set_secret(crypto.VAULT_KEY, crypto.new_key())
+    _audit(config, "banco_chave_mfa_gerada", substituida=bool(args.force))
+    print("Chave de criptografia gerada e salva no cofre do sistema. Faça uma cópia segura dela: sem ela, "
+          "as chaves MFA gravadas no banco não podem ser lidas.")
+    return EXIT_OK
+
+
+# --- cadastro de clientes e serviços --------------------------------------------------
+
+
+@contextlib.contextmanager
+def _db(config: AppConfig):
+    """Conexão com commit ao final (ou rollback em caso de erro)."""
+    conn = db.connect(_require_database(config), _store(config))
+    try:
+        yield conn
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _settings_from(pairs: list[str]) -> dict:
+    settings = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            raise ConfigError(f"Use CHAVE=VALOR em --set (recebido: '{pair}').")
+        if key.lower() in FORBIDDEN_KEYS:
+            raise ConfigError(f"'{key}' parece uma credencial: credenciais não ficam nas configurações do serviço.")
+        try:
+            settings[key] = json.loads(value)  # números, true/false, listas e objetos JSON
+        except json.JSONDecodeError:
+            settings[key] = value
+    return settings
+
+
+def _checked_class(identifier: str) -> str:
+    identifier = (identifier or "").strip()
+    if not identifier:
+        raise ConfigError("Informe a classe do coletor em --class.")
+    known = sorted(set(COLLECTORS) | api_credentials.API_CLASSES)
+    if identifier not in known and "." not in identifier:
+        raise ConfigError(f"Classe '{identifier}' desconhecida. Use um destes tipos: {', '.join(known)}, "
+                          "ou o caminho completo da classe (pacote.modulo.Classe).")
+    return identifier
+
+
+def _services_label(customer: repository.Customer) -> str:
+    def label(slug):
+        text = f"{slug} → {customer.external[slug]}" if slug in customer.external else slug
+        return f"{text} (MFA própria)" if slug in customer.with_mfa else text
+    return ", ".join(label(slug) for slug in customer.services) or "—"
+
+
+def _prompt_mfa(store) -> str:
+    """Pede a chave MFA (oculta), valida e devolve já criptografada."""
+    key = crypto.load_key(store)  # antes de pedir o segredo: sem chave, nem pergunta
+    secret = normalize_totp_secret(getpass.getpass("Chave MFA (segredo TOTP base32, não será exibida): "))
+    if not is_valid_totp_secret(secret):
+        raise CredentialError("Chave MFA inválida (esperado texto base32, ex.: JBSWY3DPEHPK3PXP). Nada foi alterado.")
+    return crypto.encrypt_secret(secret, key)
+
+
+def cmd_customers_add(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        customer_id = repository.add_customer(conn, args.name, args.desk_manager_id)
+    _audit(config, "cliente_cadastrado", cliente=args.name.strip(), id=customer_id, desk_manager_id=args.desk_manager_id)
+    print(f"Cliente '{args.name.strip()}' cadastrado (id {customer_id}).")
+    return EXIT_OK
+
+
+def cmd_customers_list(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        customers = repository.list_customers(conn)
+    if not customers:
+        print("Nenhum cliente cadastrado. Use 'jervis customers add \"NOME\"'.")
+        return EXIT_OK
+    _print_table(["ID", "CLIENTE", "DESK MANAGER", "SERVIÇOS"],
+                 [[str(c.id), c.name, c.desk_manager_id or "—", _services_label(c)] for c in customers])
+    print(f"\n{len(customers)} cliente(s).")
+    return EXIT_OK
+
+
+def cmd_customers_show(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        c = repository.find_customer(conn, args.customer)
+    print(f"Cliente: {c.name} (id {c.id})\nDesk Manager: {c.desk_manager_id or '—'}")
+    if not c.services:
+        print("Serviços: nenhum (use 'jervis customers link')")
+        return EXIT_OK
+    print()
+    _print_table(["SERVIÇO", "NOME NA PLATAFORMA", "PRODUTOS CONTRATADOS", "DISPOSITIVOS", "MFA"],
+                 [[slug, c.external.get(slug) or f"{c.name} (nome do cadastro)",
+                   "; ".join((c.contracts.get(slug) or {}).get("produtos") or []) or "—",
+                   str((c.contracts.get(slug) or {}).get("dispositivos") or "—"),
+                   "própria do cliente" if slug in c.with_mfa else "a da conta de parceiro"] for slug in c.services])
+    return EXIT_OK
+
+
+def cmd_customers_update(args: argparse.Namespace, config: AppConfig) -> int:
+    if args.name is None and args.desk_manager_id is None:
+        raise ConfigError("Informe --name e/ou --desk-manager-id.")
+    with _db(config) as conn:
+        c = repository.update_customer(conn, args.customer, args.name, args.desk_manager_id)
+    _audit(config, "cliente_alterado", id=c.id, nome=args.name, desk_manager_id=args.desk_manager_id)
+    print(f"Cliente atualizado: {c.name} (id {c.id}), Desk Manager: {c.desk_manager_id or '—'}.")
+    return EXIT_OK
+
+
+def cmd_customers_remove(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        c = repository.find_customer(conn, args.customer)
+        if not args.yes:
+            extra = f" e {len(c.services)} vínculo(s) ({', '.join(c.services)})" if c.services else ""
+            if input(f"Remover o cliente '{c.name}' (id {c.id}){extra}? [s/N] ").strip().lower() not in ("s", "sim"):
+                print("Nada foi removido.")
+                return EXIT_OK
+        repository.remove_customer(conn, str(c.id))
+    _audit(config, "cliente_removido", cliente=c.name, id=c.id, servicos=c.services)
+    print(f"Cliente '{c.name}' removido" + (f", com os vínculos: {', '.join(c.services)}." if c.services else "."))
+    return EXIT_OK
+
+
+def cmd_customers_link(args: argparse.Namespace, config: AppConfig) -> int:
+    token = _prompt_mfa(_store(config)) if args.mfa else None if args.clear_mfa else repository.KEEP
+    external = repository.KEEP if args.external_name is None else args.external_name
+    products = repository.KEEP if args.products is None else args.products
+    contracted = repository.KEEP if args.contracted is None else (args.contracted or None)
+    if args.contracted is not None and args.contracted < 0:
+        raise ConfigError("--contracted deve ser zero ou positivo.")
+    with _db(config) as conn:
+        customer, service, created = repository.link(conn, args.customer, args.service, token, external, products, contracted)
+    mfa = "cadastrada" if args.mfa else "removida" if args.clear_mfa else None
+    _audit(config, "vinculo_criado" if created else "vinculo_alterado", cliente=customer.name, servico=service.slug,
+           nome_na_plataforma=customer.name_on(service.slug), **({"chave_mfa": mfa} if mfa else {}))
+    print(f"{customer.name} ↔ {service.slug}: vínculo {'criado' if created else 'atualizado'}; "
+          f"nome na plataforma: {customer.name_on(service.slug)}"
+          + (f"; chave MFA própria {mfa} (criptografada)." if mfa == "cadastrada" else f"; chave MFA própria {mfa}." if mfa else "."))
+    return EXIT_OK
+
+
+def cmd_customers_report(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.api.run import reportable_customers, run_customer
+
+    if bool(args.customer) == bool(args.all_customers):
+        raise ConfigError("Informe um cliente ou --all.")
+    if args.all_customers and (args.notes or args.open):
+        raise ConfigError("--notes e --open valem para um cliente só (com --all, as notas vêm de notas/<cliente>/).")
+    formats = None
+    if args.formats:
+        formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
+        invalid = [f for f in formats if f not in REPORT_FORMATS]
+        if invalid:
+            raise ConfigError(f"Formato(s) inválido(s): {', '.join(invalid)}. Opções: {', '.join(REPORT_FORMATS)}.")
+    from jervis.api import collect
+
+    if args.days is not None:
+        if args.days <= 0:
+            raise ConfigError("--days deve ser um número positivo de dias.")
+        period = collect.last_days(args.days)
+    else:
+        try:
+            period = collect.month(args.month)  # sem --month: o mês atual, até hoje
+        except ValueError as exc:
+            raise ConfigError(f"--month: {exc}") from exc
+    notes = Path(args.notes) if args.notes else None
+    if notes and not notes.is_file():
+        raise ConfigError(f"Arquivo de notas não encontrado: {notes}")
+    if args.all_customers:
+        return _report_all(config, reportable_customers, run_customer, period, formats, args.ia)
+    with _db(config) as conn:
+        run = run_customer(config, _store(config), conn, args.customer, period=period, formats=formats, notes=notes,
+                           ai=args.ia)
+    statuses = {r.platform: r.status for r in run.results}
+    _audit(config, "relatorio_cliente", cliente=run.customer.name, execucao=str(run.run_dir), plataformas=statuses)
+    print(f"\nRelatório em {run.run_dir}")
+    if args.open and run.files.get("html"):
+        _open_file(run.files["html"][0])
+    return EXIT_OK if all(s == "sucesso" for s in statuses.values()) else 2
+
+
+def _report_all(config: AppConfig, reportable_customers, run_customer, period, formats, ai: bool) -> int:
+    """Relatório de cada cliente vinculado, um após o outro; a falha de um não interrompe os demais."""
+    store, summary = _store(config), []
+    with _db(config) as conn:
+        customers = reportable_customers(conn)
+        if not customers:
+            print("Nenhum cliente vinculado a Acronis ou Zabbix. Veja 'jervis services clients acronis --import'.")
+            return EXIT_OK
+        print(f"{len(customers)} cliente(s): {', '.join(c.name for c in customers)}\n")
+        for index, customer in enumerate(customers, 1):
+            print(f"[{index}/{len(customers)}] ", end="")
+            try:
+                run = run_customer(config, store, conn, str(customer.id), period=period, formats=formats, ai=ai)
+            except JervisError as exc:
+                print(f"{customer.name}: FALHA — {redact(str(exc))}\n")
+                summary.append([customer.name, "falha", redact(str(exc))])
+                continue
+            statuses = {r.platform: r.status for r in run.results}
+            _audit(config, "relatorio_cliente", cliente=customer.name, execucao=str(run.run_dir), plataformas=statuses)
+            ok = all(s == "sucesso" for s in statuses.values())
+            summary.append([customer.name, "sucesso" if ok else "parcial", str(run.run_dir)])
+            print()
+    print("Resumo:")
+    _print_table(["CLIENTE", "SITUAÇÃO", "PASTA / MOTIVO"], summary)
+    return EXIT_OK if all(row[1] == "sucesso" for row in summary) else 2
+
+
+def cmd_customers_unlink(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        customer, service = repository.unlink(conn, args.customer, args.service)
+    _audit(config, "vinculo_removido", cliente=customer.name, servico=service.slug)
+    print(f"{customer.name} desvinculado de {service.slug}.")
+    return EXIT_OK
+
+
+def cmd_services_add(args: argparse.Namespace, config: AppConfig) -> int:
+    url = validate_url(args.url, args.slug)
+    cls, settings = _checked_class(args.class_identifier), _settings_from(args.set)
+    with _db(config) as conn:
+        service_id = repository.add_service(conn, args.slug, url, cls, settings)
+    _audit(config, "servico_cadastrado", servico=args.slug, id=service_id, url=url, classe=cls, configuracoes=sorted(settings))
+    print(f"Serviço '{args.slug}' cadastrado (id {service_id}).")
+    return EXIT_OK
+
+
+def cmd_services_list(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        services = repository.list_services(conn)
+    if not services:
+        print("Nenhum serviço cadastrado. Use 'jervis services add <slug> --url ... --class ...'.")
+        return EXIT_OK
+    store = _store(config)
+
+    def login(slug):
+        try:
+            return "cofre" if store.status(slug).configured else "ausente"
+        except CredentialError:
+            return "erro no cofre"
+
+    def api(service):
+        if service.class_identifier not in api_credentials.API_CLASSES:
+            return "—"
+        return "cofre" if api_credentials.configured(store, service.slug, service.class_identifier) else "ausente"
+
+    _print_table(["ID", "SLUG", "CLASSE", "CLIENTES", "API", "URL", "CONFIGURAÇÕES"],
+                 [[str(s.id), s.slug, s.class_identifier, str(s.customers), api(s), s.url,
+                   json.dumps(s.settings, ensure_ascii=False) if s.settings else "—"] for s in services])
+    return EXIT_OK
+
+
+def cmd_services_update(args: argparse.Namespace, config: AppConfig) -> int:
+    if not (args.url or args.class_identifier or args.set or args.unset or args.mfa or args.clear_mfa):
+        raise ConfigError("Informe --url, --class, --set, --unset, --mfa e/ou --clear-mfa.")
+    url = validate_url(args.url, args.slug) if args.url else None
+    cls = _checked_class(args.class_identifier) if args.class_identifier else None
+    token = _prompt_mfa(_store(config)) if args.mfa else None
+    with _db(config) as conn:
+        s = repository.update_service(conn, args.slug, url, cls, _settings_from(args.set), args.unset)
+        if args.mfa or args.clear_mfa:
+            s = repository.set_service_mfa(conn, args.slug, token)
+    mfa = "cadastrada" if args.mfa else "removida" if args.clear_mfa else None
+    _audit(config, "servico_alterado", servico=s.slug, url=url, classe=cls, alteradas=sorted(_settings_from(args.set)),
+           removidas=args.unset, **({"chave_mfa": mfa} if mfa else {}))
+    if mfa:
+        print(f"Chave MFA da conta de parceiro {mfa}" + (" (criptografada)." if args.mfa else "."))
+    print(f"Serviço '{s.slug}' atualizado: {s.url} · {s.class_identifier} · "
+          f"{json.dumps(s.settings, ensure_ascii=False) if s.settings else 'sem configurações extras'}")
+    return EXIT_OK
+
+
+def cmd_services_set_api_credentials(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        service = repository.find_service(conn, args.slug)
+    fields = api_credentials.fields_for(service.class_identifier)
+    values = {}
+    for field in fields:
+        prompt = f"{field.label}" + (" (não será exibida): " if field.secret else ": ")
+        value = (getpass.getpass(prompt) if field.secret else input(prompt)).strip()
+        if not value:
+            raise CredentialError(f"{field.label} vazio. Nada foi alterado.")
+        values[field.name] = value
+    store = _store(config)
+    api_credentials.save(store, service.slug, service.class_identifier, values)
+    _audit(config, "servico_api_credencial_cadastrada", servico=service.slug, campos=[f.name for f in fields])
+    print(f"Credenciais de API de '{service.slug}' salvas no cofre do sistema. Teste com: jervis services test-api {service.slug}")
+    return EXIT_OK
+
+
+def cmd_services_test_api(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.api import factory
+
+    with _db(config) as conn:
+        service = repository.find_service(conn, args.slug)
+    try:
+        detail = factory.build(service, _store(config)).check()
+    except ApiError as exc:
+        print(f"[FALHA] {service.slug}: {redact(str(exc))}")
+        return EXIT_FAILURE
+    print(f"[OK] {service.slug}: {detail}")
+    return EXIT_OK
+
+
+def cmd_services_clients(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.api import factory, sync
+
+    with _db(config) as conn:
+        service = repository.find_service(conn, args.slug)
+        api = factory.build(service, _store(config))
+        if not hasattr(api, "customer_names"):
+            raise ConfigError(f"O serviço '{service.slug}' ({service.class_identifier}) não lista clientes por API.")
+        try:
+            names = api.customer_names()
+        except ApiError as exc:
+            print(f"[FALHA] {service.slug}: {redact(str(exc))}")
+            return EXIT_FAILURE
+        customers = repository.list_customers(conn)
+        rows = sync.compare(names, customers, service.slug)
+        if args.only:
+            wanted = {n.strip().lower() for n in args.only}
+            rows = [r for r in rows if r.name.lower() in wanted]
+            missing = wanted - {r.name.lower() for r in rows}
+            if missing:
+                raise ConfigError(f"Não encontrado(s) em {service.slug}: {', '.join(sorted(missing))}.")
+        _print_table(["CLIENTE NA PLATAFORMA", "SITUAÇÃO", "CLIENTE NO JERVIS"],
+                     [[r.name, r.status, f"{r.customer.name} (id {r.customer.id})" if r.customer else "—"] for r in rows])
+        counts = {status: sum(r.status == status for r in rows) for status in (sync.LINKED, sync.UNLINKED, sync.NEW, sync.AMBIGUOUS)}
+        print(f"\n{len(rows)} cliente(s) em {service.slug}: " + ", ".join(f"{n} {s}" for s, n in counts.items() if n))
+        if not args.only:
+            for c in sync.orphans(names, customers, service.slug):
+                print(f"Atenção: {c.name} está vinculado a {service.slug} como '{c.name_on(service.slug)}', que não existe "
+                      f"na plataforma. Ajuste com 'jervis customers link {c.id} {service.slug} --external-name ...'.")
+        if counts[sync.AMBIGUOUS]:
+            print("Nomes repetidos no cadastro não são importados: vincule com 'jervis customers link <id> ...'.")
+        pending = [r for r in rows if r.status in (sync.NEW, sync.UNLINKED)]
+        if not args.do_import:
+            if pending:
+                print(f"Para cadastrar e vincular os {len(pending)} que faltam: jervis services clients {service.slug} --import")
+            return EXIT_OK
+        if not pending:
+            print("Nada a importar.")
+            return EXIT_OK
+        question = f"Cadastrar/vincular {len(pending)} cliente(s) a {service.slug}? [s/N] "
+        if not args.yes and input(question).strip().lower() not in ("s", "sim"):
+            print("Nada foi alterado.")
+            return EXIT_OK
+        done = sync.import_missing(conn, pending, service.slug)
+    created = [name for name, new in done if new]
+    _audit(config, "clientes_importados", servico=service.slug, cadastrados=created, vinculados=[name for name, _ in done])
+    print(f"{len(done)} vínculo(s) criado(s) com {service.slug} ({len(created)} cliente(s) novo(s) no cadastro).")
+    return EXIT_OK
+
+
+def cmd_services_set_credentials(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        service = repository.find_service(conn, args.slug)  # só para serviço cadastrado
+    username = args.username or input(f"Usuário da conta de parceiro em {service.slug}: ").strip()
+    password = getpass.getpass("Senha: ")
+    if not username or not password or password != getpass.getpass("Confirme a senha: "):
+        raise CredentialError("Usuário vazio ou senhas que não conferem. Nada foi alterado.")
+    store = _store(config)
+    store.set(service.slug, username, password)
+    _audit(config, "servico_credencial_cadastrada", servico=service.slug, usuario=mask_username(username))
+    print(f"Credenciais da conta de parceiro em '{service.slug}' salvas no cofre do sistema ({store.backend_name()}).")
+    if store.status(service.slug).source == "env":
+        print(f"Atenção: as variáveis {env_prefix(service.slug)}* estão definidas e têm prioridade sobre o cofre.")
+    return EXIT_OK
+
+
+def cmd_services_remove(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        s = repository.remove_service(conn, args.slug)
+    _audit(config, "servico_removido", servico=s.slug, id=s.id)
+    print(f"Serviço '{s.slug}' removido.")
+    return EXIT_OK
+
+
+# Não disparam a criação automática das tabelas: preparam o acesso (credenciais/chave podem não existir
+# ainda), criam as tabelas explicitamente ou só observam.
+_DB_SETUP_COMMANDS = (cmd_db_init, cmd_db_status, cmd_db_set_credentials, cmd_db_generate_key)
 
 
 # --- driver do navegador --------------------------------------------------------------

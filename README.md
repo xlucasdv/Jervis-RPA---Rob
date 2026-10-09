@@ -14,8 +14,8 @@ login automatizado ─► coleta das 3 plataformas ─► consolidação e class
 ## Início rápido
 
 ```powershell
-py -3.12 -m venv .venv
-.venv\Scripts\python -m pip install -e ".[dev]"
+py -3.12 -m pip install --user uv                     # gerenciador de dependências (uma vez)
+py -3.12 -m uv sync                                     # cria o .venv com as versões travadas do uv.lock
 .venv\Scripts\python -m jervis init                    # cria config\platforms.yaml
 .venv\Scripts\python -m jervis platforms set-url zabbix https://zabbix.empresa.com.br/index.php
 .venv\Scripts\python -m jervis credentials set zabbix --username svc_coleta
@@ -58,6 +58,12 @@ mantém atualizado o driver do Edge ([instalação](docs/instalacao.md#driver-do
 | `jervis notify set-smtp-password / set-webhook / test` | Notificações por e-mail e Teams/Slack |
 | `jervis audit [--verify]` | Trilha de auditoria (quem coletou e quem alterou a configuração) |
 | `jervis config show` | Configuração efetiva (base + ambiente) |
+| `jervis customers add / list / show / update / remove / link / unlink` | Clientes no banco e os serviços de cada um (com chave MFA criptografada) |
+| `jervis customers report <cliente> \| --all [--month AAAA-MM] [--ia]` | Coleta por API e gera o Relatório Mensal, o Relatório Executivo e o `resumo.md` (padrão: mês atual); `--all`: todos os clientes vinculados |
+| `jervis services clients <serviço> [--import]` | Clientes que existem no Acronis/Zabbix x cadastro; `--import` cadastra e vincula os que faltam |
+| `jervis ia set-key / delete-key` | Chave da API do Claude no cofre (texto opcional do relatório executivo) |
+| `jervis services add / list / update / remove` | Serviços (plataformas) no banco: url, slug, classe do coletor e configurações |
+| `jervis db init / status / set-credentials / generate-key` | Banco MySQL: tabelas, credenciais e chave que criptografa as chaves MFA |
 
 Opções globais: `--env <ambiente>` (ou `JERVIS_ENV`), `-c <arquivo>`, `-v`. Use sempre
 `.venv\Scripts\python -m jervis ...`.

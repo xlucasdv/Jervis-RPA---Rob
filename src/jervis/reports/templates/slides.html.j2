@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>{{ s.kind }} – {{ s.client }} – {{ s.period_short }}</title>
+<style>
+  @page { size: 1280px 720px; margin: 0; }
+  :root {
+    --bg: #160d2e; --card: #22163f; --card-2: #2a1c4d; --border: #3a2a63; --text: #ffffff; --muted: #b9b0d4;
+    --soft: #8f86a8; --purple: #a67cf0; --green: #2fd6a0; --yellow: #f5b942; --red: #f0616d; --blue: #4f8ff7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0d0820; }
+  body { font-family: "Segoe UI", Calibri, Arial, sans-serif; color: var(--text);
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .slide { width: 1280px; height: 720px; background: var(--bg); position: relative; overflow: hidden;
+           padding: 30px 48px 0 48px; margin: 24px auto; page-break-after: always; break-after: page; }
+  @media print { .slide { margin: 0; } html, body { background: var(--bg); } }
+  .section { color: var(--purple); font-weight: 700; letter-spacing: .22em; font-size: 13px; text-transform: uppercase; }
+  h1 { font-family: Cambria, Georgia, "Times New Roman", serif; font-weight: 700; font-size: 36px; margin: 6px 0 6px; line-height: 1.12; }
+  .meta { color: var(--muted); font-size: 15px; }
+  .meta b { color: #d9d2ef; }
+  .footer { position: absolute; left: 48px; right: 48px; bottom: 0; height: 40px; border-top: 1px solid var(--border);
+            display: flex; align-items: center; gap: 14px; color: var(--soft); font-size: 11px; }
+  .footer .page { margin-left: auto; }
+  .brand { display: inline-flex; align-items: center; gap: 6px; color: #fff; font-weight: 700; }
+  .brand .name { line-height: .95; font-size: 13px; }
+  .brand .name small { display: block; font-style: italic; font-size: 10px; }
+  .brand img { height: 22px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+  .ico { width: 44px; height: 44px; border-radius: 50%; background: var(--card-2); display: inline-flex; align-items: center;
+         justify-content: center; color: #fff; flex: none; }
+  .ico.big { width: 64px; height: 64px; }
+
+  /* capa */
+  .cover-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .cover h1 { font-size: 46px; margin-top: 8px; }
+  .cover .period { text-align: right; color: #fff; font-size: 16px; }
+  .cover .period b { display: block; font-size: 22px; margin-top: 6px; }
+  .cover .brand-big { justify-content: flex-end; margin-bottom: 10px; }
+  .cover .brand-big .name { font-size: 30px; }
+  .cover .brand-big .name small { font-size: 18px; }
+  .cover .brand-big img { height: 72px; }
+  .services-line { color: var(--muted); font-size: 16px; margin: 26px 0 26px; }
+  .client { font-size: 19px; margin-bottom: 18px; }
+  .service-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  .service-card { height: 170px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; }
+  .service-card .name { font-weight: 700; font-size: 17px; }
+  .service-card .sub { color: var(--muted); font-size: 13px; }
+
+  /* cartões de destaque */
+  .card-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; margin-top: 18px; }
+  .card-grid.two { grid-template-columns: repeat(2, 1fr); }
+  .hl { height: 255px; padding: 24px 26px; }
+  .hl .head { display: flex; gap: 16px; align-items: flex-start; }
+  .hl .title { font-weight: 700; font-size: 17px; line-height: 1.3; }
+  .hl .text { color: var(--muted); font-size: 14px; line-height: 1.55; margin-top: 16px; }
+  .hl.tone { border-left: 4px solid var(--tone); }
+
+  /* página de serviço */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-top: 20px; }
+  .kpi { height: 190px; padding: 18px 20px; }
+  .kpi .head { display: flex; gap: 12px; align-items: flex-start; font-weight: 700; font-size: 15px; }
+  .kpi .value { font-size: 40px; font-weight: 800; margin-top: 8px; line-height: 1.05; }
+  .kpi .note { color: var(--muted); font-size: 12.5px; margin-top: 10px; line-height: 1.4; }
+  .lower { display: grid; grid-template-columns: 1.05fr 1fr; gap: 26px; margin-top: 24px; }
+  .panel { height: 312px; padding: 20px 26px; overflow: hidden; }
+  .panel h3 { margin: 0 0 12px; font-size: 19px; display: flex; gap: 10px; align-items: center; }
+  .chart { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 240px; }
+  .donut text { fill: #10091f; font-weight: 800; font-size: 15px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: center; color: #e6e0f5; font-size: 12.5px; margin-top: 6px; }
+  .legend i { display: inline-block; width: 11px; height: 11px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
+  .bullets { margin: 0; padding: 0; list-style: none; }
+  .bullets li { position: relative; padding-left: 20px; margin: 0 0 13px; font-size: 14.5px; line-height: 1.45; }
+  .bullets li::before { content: ""; position: absolute; left: 2px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
+  .bars { width: 100%; }
+  .bar-row { display: grid; grid-template-columns: 210px 1fr; align-items: center; gap: 12px; margin: 7px 0; }
+  .bar-label { text-align: right; font-size: 13px; color: #e6e0f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { display: flex; align-items: center; gap: 8px; }
+  .bar { height: 22px; border-radius: 2px; }
+  .bar-value { font-weight: 700; font-size: 13px; white-space: nowrap; }
+  .empty { color: var(--soft); font-size: 14px; }
+  .two-charts .panel { height: 520px; }
+  .two-charts .chart { height: 430px; }
+
+  /* nota técnica */
+  .note-card { margin-top: 24px; padding: 28px 32px; min-height: 240px; }
+  .badge { display: inline-block; padding: 7px 22px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #10091f; }
+  .note-card .text { font-size: 17px; line-height: 1.6; margin-top: 20px; }
+  .note-card .next { color: var(--muted); font-style: italic; font-size: 15px; margin-top: 26px; }
+
+  /* recomendações */
+  .rec { width: 100%; border-collapse: separate; border-spacing: 0 9px; margin-top: 12px; }
+  .rec th { text-align: left; font-size: 15px; padding: 10px 18px; background: var(--card); }
+  .rec th:first-child { border-radius: 8px 0 0 8px; } .rec th:last-child { border-radius: 0 8px 8px 0; }
+  .rec td { background: var(--card); padding: 12px 18px; font-size: 14px; vertical-align: middle; }
+  .rec td:first-child { border-radius: 8px 0 0 8px; width: 190px; }
+  .rec td:last-child { border-radius: 0 8px 8px 0; color: var(--muted); }
+  .rec .badge { width: 160px; text-align: center; }
+
+  /* tabelas (anexo / problemas) */
+  .tbl { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+  .tbl th { text-align: left; color: #d9d2ef; background: var(--card); padding: 10px 12px; font-size: 13px; }
+  .tbl td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .tbl td.tone { border-left: 4px solid var(--tone); font-weight: 600; white-space: nowrap; }
+  .tbl td.muted { color: var(--muted); white-space: nowrap; }
+  .tbl-note { color: var(--soft); font-size: 12px; margin-top: 10px; }
+  .message { margin-top: 40px; padding: 40px; font-size: 18px; color: var(--muted); }
+</style>
+</head>
+<body>
+{% macro brand(big=false) -%}
+<span class="brand{% if big %} brand-big{% endif %}">
+  {% if s.logo %}<img src="{{ s.logo }}" alt="{{ s.company }}">{% else %}{{ s.logo_icon | safe }}
+  <span class="name">{{ s.company.split(' ')[0] }}{% if ' ' in s.company %}<small>{{ s.company.split(' ', 1)[1] }}</small>{% endif %}</span>{% endif %}
+</span>
+{%- endmacro %}
+{% macro footer(slide) -%}
+<div class="footer">{{ brand() }}<span>{{ s.footer }}</span><span class="page">{{ slide.number }}</span></div>
+{%- endmacro %}
+{% macro header(slide) -%}
+<div class="section">{{ slide.section }}</div>
+<h1>{{ slide.title }}</h1>
+<div class="meta">Período analisado: <b>{{ s.period_short }}</b> &nbsp;·&nbsp; Serviço: <b>{{ slide.service }}</b></div>
+{%- endmacro %}
+
+{% for slide in s.slides %}
+<section class="slide{% if slide.kind == 'two_charts' %} two-charts{% endif %}{% if slide.kind == 'cover' %} cover{% endif %}">
+{% if slide.kind == 'cover' %}
+  <div class="cover-top">
+    <div><div class="section">{{ s.kind_upper }}</div><h1>Segurança e Monitoramento</h1></div>
+    <div class="period">{{ brand(true) }}<div>Período analisado:<b>{{ s.period }}</b></div></div>
+  </div>
+  <div class="services-line">Serviços: {{ s.services_line }}</div>
+  <div class="client">Cliente: <b>{{ s.client }}</b></div>
+  <div class="service-grid">
+    {% for svc in slide.services %}
+    <div class="card service-card"><span class="ico big">{{ svc.icon | safe }}</span>
+      <div class="name">{{ svc.name }}</div><div class="sub">{{ svc.subtitle }}</div></div>
+    {% endfor %}
+  </div>
+
+{% elif slide.kind == 'cards' %}
+  {{ header(slide) }}
+  <div class="card-grid{% if slide.cards | length in (2, 4) %} two{% endif %}">
+    {% for c in slide.cards %}
+    <div class="card hl{% if c.tone %} tone{% endif %}"{% if c.tone %} style="--tone: {{ c.tone }}"{% endif %}>
+      <div class="head"><span class="ico">{{ c.icon | safe }}</span><div class="title">{{ c.title }}</div></div>
+      <div class="text">{{ c.text }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+{% elif slide.kind == 'service' %}
+  {{ header(slide) }}
+  <div class="kpis">
+    {% for k in slide.kpis %}
+    <div class="card kpi">
+      <div class="head"><span class="ico">{{ k.icon | safe }}</span><span>{{ k.label }}</span></div>
+      <div class="value"{% if k.color %} style="color: {{ k.color }}"{% endif %}>{{ k.value }}</div>
+      <div class="note">{{ k.note }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="lower">
+    <div class="card panel"><h3>{{ slide.chart_title }}</h3>
+      <div class="chart">{{ slide.chart | safe }}{% if slide.legend %}<div class="legend">{{ slide.legend | safe }}</div>{% endif %}</div></div>
+    <div class="card panel"><h3>{{ slide.panel_icon | safe }} {{ slide.panel_title }}</h3>
+      <ul class="bullets">
+        {% for tone, text in slide.bullets[:6] %}
+        <li style="--dot: var(--{{ tone }})">{{ text }}</li>
+        {% endfor %}
+      </ul></div>
+  </div>
+
+{% elif slide.kind == 'two_charts' %}
+  {{ header(slide) }}
+  <div class="lower">
+    <div class="card panel"><h3>{{ slide.left_title }}</h3><div class="chart">{{ slide.left | safe }}</div></div>
+    <div class="card panel"><h3>{{ slide.right_title }}</h3>
+      <div class="chart">{{ slide.right | safe }}<div class="legend">{{ slide.right_legend | safe }}</div></div></div>
+  </div>
+
+{% elif slide.kind == 'note' %}
+  {{ header(slide) }}
+  <div class="card note-card">
+    {% if slide.badge %}<span class="badge" style="background: var(--blue)">{{ slide.badge }}</span>{% endif %}
+    <div class="text">{{ slide.text }}</div>
+    {% if slide.next %}<div class="next">Próxima ação: {{ slide.next }}</div>{% endif %}
+  </div>
+
+{% elif slide.kind == 'recommendations' %}
+  {{ header(slide) }}
+  <table class="rec">
+    <tr><th>Criticidade</th><th>Ponto de atenção</th><th>Ação recomendada</th></tr>
+    {% for r in slide.recs %}
+    <tr><td><span class="badge" style="background: {{ r.color }}">{{ r.label }}</span></td><td>{{ r.point }}</td><td>{{ r.action }}</td></tr>
+    {% endfor %}
+  </table>
+
+{% elif slide.kind == 'table' %}
+  {{ header(slide) }}
+  <table class="tbl">
+    <tr>{% for h in slide.headers %}<th>{{ h }}</th>{% endfor %}</tr>
+    {% for r in slide.rows %}
+    <tr><td class="tone" style="--tone: {{ r.tone }}">{{ r.a }}</td><td>{{ r.b }}</td><td class="muted">{{ r.c }}</td><td class="muted">{{ r.d }}</td></tr>
+    {% endfor %}
+  </table>
+  {% if slide.note %}<div class="tbl-note">{{ slide.note }}</div>{% endif %}
+
+{% elif slide.kind == 'message' %}
+  {{ header(slide) }}
+  <div class="card message">{{ slide.text }}</div>
+{% endif %}
+  {% if slide.kind != 'cover' %}{{ footer(slide) }}{% else %}<div class="footer">{{ brand() }}<span>{{ s.footer }}</span><span class="page">{{ slide.number }}</span></div>{% endif %}
+</section>
+{% endfor %}
+</body>
+</html>

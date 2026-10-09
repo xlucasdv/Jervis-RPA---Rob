@@ -1,4 +1,4 @@
-"""Relatório em HTML (arquivo único, sem dependências externas; também é a base do PDF)."""
+"""Relatório em HTML no padrão de apresentação (arquivo único, sem dependências externas; também é a base do PDF)."""
 
 from __future__ import annotations
 
@@ -26,8 +26,16 @@ _env = Environment(
     lstrip_blocks=True,
 )
 _env.filters["dt"] = format_datetime
+_env.filters["num"] = lambda v: (f"{v:,}".replace(",", ".") if isinstance(v, int) else f"{v:.2f}".replace(".", ",")
+                                 if isinstance(v, float) else v)
 
 
-def render_html(data: dict[str, Any], compact: bool = False) -> str:
-    """``compact``: versão para impressão/PDF, sem filtros e sem os registros normais nas seções por plataforma."""
-    return _env.get_template("report.html.j2").render(d=data, compact=compact)
+def render_executive(document: dict[str, Any]) -> str:
+    """Relatório executivo (documento A4)."""
+    return _env.get_template("executivo.html.j2").render(e=document)
+
+
+def render_slides(slides: dict[str, Any]) -> str:
+    """Relatório no padrão de apresentação (páginas 16:9); base do HTML e do PDF."""
+    return _env.get_template("slides.html.j2").render(s=slides)
+

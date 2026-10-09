@@ -51,6 +51,9 @@ Cada execução cria `output/<data-hora>/` com:
 | `execucao.json` | Situação da execução, atualizada durante o andamento |
 | `execucao.log` | Progresso com horário, como exibido no terminal |
 
+Relatórios de um cliente coletados por API (`jervis customers report`) ficam em `output/clientes/<cliente>/<data-hora>/`:
+Relatório Mensal, Relatório Executivo e `resumo.md` ([detalhes](configuracao.md#relatórios-por-cliente-padrão-de-apresentação)).
+
 Só uma coleta roda por vez: um agendamento que dispare durante uma coleta manual é recusado com aviso.
 
 ### Códigos de saída

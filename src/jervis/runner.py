@@ -502,10 +502,11 @@ def consolidate_run(results: list[dict[str, Any]], run_dir: Path, settings: Sett
     return report
 
 
-def generate_run_reports(report: dict, run_dir: Path, settings: Settings, formats, emit: Callable[[str], None]):
+def generate_run_reports(report: dict, run_dir: Path, settings: Settings, formats, emit: Callable[[str], None],
+                         meta: dict | None = None, basename: str = "relatorio"):
     if not formats:
         return None
-    output = generate_reports(report, run_dir, formats, settings)
+    output = generate_reports(report, run_dir, formats, settings, meta=meta, basename=basename)
     for fmt in formats:
         if fmt in output.files:
             emit(f"  Relatório {fmt.upper()}: {', '.join(p.name for p in output.files[fmt])}")

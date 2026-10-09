@@ -14,9 +14,15 @@ dependencies = [
     "PyYAML>=6",
     "openpyxl>=3.1",
     "Jinja2>=3.1",
+    "PyMySQL>=1.1",       # driver do MySQL (Python puro)
+    "cryptography>=43",   # criptografia da chave MFA guardada no banco
+    "celery>=5.4",        # fila de tarefas
+    "amqp>=5.2",          # protocolo do RabbitMQ (broker do Celery)
+    "anthropic>=1.12.1",
 ]
 
-[project.optional-dependencies]
+# Gerenciado com uv:  py -3.12 -m uv sync   (instala também o grupo dev)
+[dependency-groups]
 dev = ["pytest>=8", "pytest-cov>=5", "pyflakes>=3"]
 
 [project.scripts]

@@ -1,0 +1,40 @@
+# Notas da equipe para o relatório de um cliente (o que não vem das plataformas).
+#
+# Onde salvar:  notas/<cliente>/<AAAA-MM>.yaml   (relatório mensal: --month AAAA-MM)
+#               notas/<cliente>/notas.yaml       (relatórios por período: --days N)
+#   <cliente> = nome em minúsculas, espaços e símbolos trocados por "_" (ex.: "CORE - DF" → core_df).
+#   Ou indique o arquivo: jervis customers report "CLIENTE" --month 2026-07 --notes caminho.yaml
+#
+# Tudo é opcional. Sem "destaques", a página 2 mostra os principais achados calculados dos dados.
+# Ícones disponíveis: shield, server, database, activity, monitor, alert, clock, check, info, wifi, tool, list
+
+destaques:            # página "Destaques do Mês — Principais Entregas" (até 6 cartões)
+  - titulo: Atualização crítica do agente
+    texto: Atualização realizada conforme recomendação do fabricante, corrigindo uma vulnerabilidade crítica.
+    icone: shield
+  - titulo: Rotina de atualização dos servidores
+    texto: Alinhada uma rotina de atualização a cada 3 meses para os servidores de banco de dados.
+    icone: clock
+
+notas:                # uma página por nota técnica
+  - titulo: Nota Técnica — Atualização de Firmware
+    servico: Firewall Gerenciado
+    selo: DECISÃO TÉCNICA · NÃO É PENDÊNCIA
+    texto: A versão nova do firmware não será aplicada neste momento por instabilidades conhecidas em outros ambientes.
+    proxima_acao: acompanhar as notas de versão do fabricante e reavaliar no próximo ciclo.
+
+melhorias:            # página "Melhorias em Andamento" (até 6 cartões)
+  - titulo: Novos dashboards e alertas
+    texto: Em criação, para aumentar o nível de segurança do ambiente e a interação com o cliente.
+    icone: list
+
+recomendacoes:        # entram antes das recomendações automáticas
+  - criticidade: decisao   # decisao | alta | media | baixa
+    ponto: Não aplicar o firmware 22.0.1 nos firewalls.
+    acao: Manter a versão estável até a correção do fabricante.
+
+observacoes:          # bullets extras no painel "Observações do Período" de cada serviço
+  acronis:
+    - Cliente solicitou revisão dos planos de proteção das estações.
+  zabbix:
+    - Alertas de integrações externas configurados para notificação push, sem ligação.

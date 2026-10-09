@@ -10,6 +10,7 @@ from collections import Counter, defaultdict
 from typing import Any
 
 from jervis.consolidation.model import (
+    ACTIVITY,
     AVAILABILITY,
     BACKUP_PROTECTION,
     BACKUP_TASK,
@@ -40,6 +41,7 @@ CATEGORY_LABEL = {
     HOST: "Hosts monitorados",
     MONITORING_PROBLEM: "Problemas e alertas",
     AVAILABILITY: "Indicadores de disponibilidade",
+    ACTIVITY: "Atividades e tarefas",
     COLLECTION: "Falhas da coleta",
 }
 
@@ -49,6 +51,9 @@ COLLECTION_STATUS_LABEL = {"sucesso": "Coletado", "parcial": "Coleta parcial", "
 
 DEVICE_CATEGORIES = (ENDPOINT, BACKUP_PROTECTION, HOST)
 ALERT_CATEGORIES = (SECURITY_ALERT, MONITORING_PROBLEM)
+
+# observações gravadas por rules.acronis_machine (coleta por API do Acronis)
+NO_BACKUP_NOTE, STALE_BACKUP_NOTE = "Sem plano de backup.", "Backup desatualizado."
 
 # Itens que entram na lista de prioridades da visão consolidada.
 PRIORITY_LIST_LIMIT = 100
@@ -91,6 +96,9 @@ def executive_summary(consolidated: dict[str, Any]) -> dict[str, Any]:
         "criticos": sum(1 for r in records if r["classificacao"] == "critico"),
         "backups_com_falha": sum(1 for r in tasks if (r.get("detalhes") or {}).get("situacao_backup") == "falha"),
         "backups_em_atencao": sum(1 for r in tasks if r["classificacao"] == "atencao"),
+        # Máquinas sem nenhum plano de backup (coleta por API do Acronis): "0 backups com falha" enganaria.
+        "sem_backup": sum(1 for r in records if NO_BACKUP_NOTE in (r.get("observacoes") or [])),
+        "backup_desatualizado": sum(1 for r in records if STALE_BACKUP_NOTE in (r.get("observacoes") or [])),
         "hosts_indisponiveis": sum(1 for r in records if r["categoria"] == HOST and r["classificacao"] == UNAVAILABLE),
         "plataformas_sem_resposta": [s["plataforma"] for s in silent],
         "plataformas_total": len(consolidated["fontes"]),

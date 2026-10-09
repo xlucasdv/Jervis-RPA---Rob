@@ -16,3 +16,5 @@ perfil_navegador/
 # Configuração local do ambiente (use `jervis init` para gerar a partir do modelo)
 config/platforms.yaml
 config/platforms.*.yaml
+# Notas da equipe por cliente para os relatórios (conteúdo dos clientes)
+notas/

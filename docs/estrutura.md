@@ -28,6 +28,7 @@ src/jervis/
   cli.py              comandos "jervis ..." (argparse); só orquestra, sem regra de negócio
   config.py           arquivo YAML: validação, ambientes (base + platforms.<env>.yaml), gravação
   credentials.py      cofre do sistema (keyring) e variáveis de ambiente; cofre separado por ambiente
+  db/                 MySQL: conexão, tabelas (schema.py, criadas se não existirem) e criptografia da chave MFA (crypto.py)
   security.py         SecretStr e redação de segredos em logs, JSON, relatórios e auditoria
   logging_setup.py    log geral rotativo, com id da execução em cada linha
   errors.py           exceções e categorias de falha (IssueCategory)
@@ -52,7 +53,7 @@ src/jervis/
     consolidate.py    consolidado.json/.csv
   reports/
     data.py           indicadores executivos, seções por plataforma, cores e ícones
-    html.py + templates/report.html.j2   relatório HTML (também a base do PDF)
+    slides.py + templates/slides.html.j2  relatório no padrão de apresentação 16:9 (HTML e PDF)
     excel.py | pdf.py                    Excel e impressão do HTML em PDF pelo navegador
   runner.py           execução completa: trava, progresso, completude, reprocessamento, histórico, retenção
   scheduling.py       regras de horário, Agendador de Tarefas do Windows, agendador interno

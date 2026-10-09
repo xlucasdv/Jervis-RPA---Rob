@@ -26,6 +26,8 @@ settings:
   # Relatórios gerados ao fim de cada coleta, em output/<data-hora>/relatorio.*
   report_formats: [html, xlsx, csv, pdf]   # o PDF é impresso pelo navegador configurado acima
   report_title: Relatório geral de TI
+  report_company: Contego Security   # nome exibido na capa e no rodapé dos relatórios
+  report_logo: ""            # logo (PNG/SVG/JPG) da capa e do rodapé; vazio = ícone + nome
   # Auditoria, histórico e qualidade dos dados
   audit_file: logs/auditoria.jsonl   # quem iniciou cada coleta e ações administrativas (encadeado por hash)
   retention_days: 90       # remove pastas de execução mais antigas (0 = manter tudo); o histórico é mantido
@@ -105,6 +107,13 @@ platforms:
 #     attach_report: true        # anexa o relatorio.html
 #   webhook: true                # Teams (Workflows), Slack ou JSON genérico
 #   webhook_format: teams        # teams | slack | json
+
+# Banco de dados MySQL (opcional). Com esta seção, as tabelas customers, service e customer_services são criadas
+# ao iniciar, se não existirem. Usuário e senha: jervis db set-credentials (cofre do sistema).
+# database:
+#   host: 127.0.0.1
+#   port: 3306
+#   name: jervis3000
 
 # Agendamentos (Épico 7). Instale no Agendador de Tarefas do Windows com: jervis schedule install
 # Use aspas nos horários ("07:00"): sem elas, o YAML pode interpretá-los como números.

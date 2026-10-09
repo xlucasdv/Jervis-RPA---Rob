@@ -1,0 +1,50 @@
+# MySQL e RabbitMQ locais para o Jervis3000.
+#
+# As senhas NÃO ficam neste arquivo: defina as variáveis no terminal antes de subir (PowerShell):
+#   $env:JERVIS_MYSQL_ROOT_PASSWORD = Read-Host "Senha root do MySQL" -MaskInput
+#   $env:JERVIS_MYSQL_PASSWORD      = Read-Host "Senha do usuário jervis no MySQL" -MaskInput
+#   $env:JERVIS_RABBITMQ_PASSWORD   = Read-Host "Senha do usuário jervis no RabbitMQ" -MaskInput
+#   docker compose up -d
+# As portas só aceitam conexões desta máquina (127.0.0.1).
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: jervis-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${JERVIS_MYSQL_ROOT_PASSWORD:?defina JERVIS_MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: jervis3000
+      MYSQL_USER: jervis
+      MYSQL_PASSWORD: ${JERVIS_MYSQL_PASSWORD:?defina JERVIS_MYSQL_PASSWORD}
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: jervis-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: jervis
+      RABBITMQ_DEFAULT_PASS: ${JERVIS_RABBITMQ_PASSWORD:?defina JERVIS_RABBITMQ_PASSWORD}
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP (Celery)
+      - "127.0.0.1:15672:15672"   # painel web: http://localhost:15672
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  mysql-data:
+  rabbitmq-data:

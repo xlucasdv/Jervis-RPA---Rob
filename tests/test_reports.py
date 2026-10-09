@@ -10,8 +10,8 @@ from jervis import cli
 from jervis.config import Settings
 from jervis.consolidation import consolidate
 from jervis.reports import generate_reports
-from jervis.reports.data import build_report_data, executive_summary
-from jervis.reports.html import format_datetime, render_html
+from jervis.reports.data import executive_summary
+from jervis.reports.html import format_datetime
 
 COLLECTED = "2026-10-06T12:00:00-03:00"
 
@@ -76,38 +76,33 @@ def test_executive_indicators(consolidated):
     assert e["cobertura"]["hosts"] == {"consultadas": 2, "sem_resposta": ["legado"], "com_dados": True}
 
 
-def test_indicator_without_data_is_not_shown_as_zero():
+def test_platform_without_data_gets_a_message_page(tmp_path):
     report = consolidate([
         result("sophos", "sophos", {"dispositivos": []}),
         result("acronis", "acronis", {}, status="falha", issues=[{
             "stage": "autenticacao", "category": "autenticacao", "message": "Acesso negado", "severity": "erro",
             "url": None, "screenshot": None, "timestamp": COLLECTED}]),
     ])
-    html = render_html(build_report_data(report, "R"))
-    backups_card = html.split("Backups com falha")[1].split('class="kpi')[0]
-    assert '<div class="value">—</div>' in backups_card and "sem dados: acronis sem resposta" in backups_card
-    assert "Zabbix não consultado" in html
+    generate_reports(report, tmp_path, ["html"], Settings())
+    html = (tmp_path / "relatorio.html").read_text(encoding="utf-8")
+    assert "Sem dados" in html and "Não foi possível coletar os dados desta plataforma" in html
+    assert "NOCaaS" not in html  # Zabbix não consultado: sem página de monitoramento
 
 
-# --- 6.1, 6.2, 6.5 HTML -------------------------------------------------------------------
+# --- 6.1, 6.2, 6.5 HTML no padrão de apresentação ------------------------------------------
 
-def test_html_has_all_sections_and_escapes_platform_text(consolidated):
-    html = render_html(build_report_data(consolidated, "Relatório de teste"))
-    for anchor in ("executivo", "consolidado", "prioridades", "plataforma-sophos", "plataforma-acronis",
-                   "plataforma-zabbix", "plataforma-legado", "qualidade"):
-        assert f'id="{anchor}"' in html
-    assert "<script>alert(" not in html and "&lt;script&gt;alert(" in html  # texto vindo das telas é escapado
-    assert 'class="badge critico"' in html and "<svg" in html  # cor + ícone + rótulo
-    assert "Sem resposta" in html and "legado — dados ausentes no relatório" in html
-    assert 'id="filtros"' in html  # filtros interativos na versão de tela
-
-
-def test_compact_html_for_pdf_omits_normal_rows_and_filters(consolidated):
-    data = build_report_data(consolidated, "R")
-    full, compact = render_html(data), render_html(data, compact=True)
-    assert 'id="filtros"' not in compact and "<script>" not in compact.split("</style>")[1]
-    assert "SRV-AD" in full and "SRV-AD" not in compact.split('id="plataforma-acronis"')[1].split("</section>")[0]
-    assert "registro(s) normal(is) omitido(s)" in compact
+def test_html_follows_presentation_layout_and_escapes_platform_text(consolidated, tmp_path):
+    meta = {"cliente": "Club Teste", "tipo": "Relatório Mensal", "periodo": "Julho de 2026", "periodo_curto": "Julho/2026"}
+    generate_reports(consolidated, tmp_path, ["html"], Settings(), meta=meta)
+    html = (tmp_path / "relatorio.html").read_text(encoding="utf-8")
+    assert "RELATÓRIO MENSAL" in html and "Segurança e Monitoramento" in html and "Cliente: <b>Club Teste</b>" in html
+    assert "Club Teste · Relatório Mensal — Julho/2026" in html  # rodapé de todas as páginas
+    assert html.count('class="slide') >= 5 and '<span class="page">01</span>' in html
+    assert "Sophos Central – Visão Geral" in html and "Acronis Cyber Protect – Visão Geral" in html  # página genérica
+    assert "Recomendações Priorizadas" not in html or "badge" in html
+    assert "Anexo – Itens Prioritários" in html
+    assert "<script>alert(" not in html and "&lt;script&gt;alert(" in html  # texto vindo das plataformas é escapado
+    assert "<script" not in html.split("</style>")[1]  # sem JavaScript: funciona igual no PDF
 
 
 def test_format_datetime():
