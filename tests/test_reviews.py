@@ -153,14 +153,80 @@ def test_reviews_list_output(monkeypatch, capsys):
     assert "#12" in out and "CERMISSOES" in out and "2026-09" in out and "pendente" in out and "1 relatório(s)." in out
 
 
-def test_schedule_task_runs_the_month_close(monkeypatch):
+def test_schedule_task_runs_the_month_close(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(cli, "_month_close", lambda config, month, origin, notify=True: calls.append((month, origin)) or 0)
     schedule = ScheduleConfig(name="fechamento_mensal", frequency="monthly", day=1, times=["06:00"], task="relatorios_clientes")
-    assert cli._run_schedule(AppConfig(settings=Settings(), platforms={}), schedule) == 0
+    assert cli._run_schedule(AppConfig(settings=Settings(output_dir=str(tmp_path)), platforms={}), schedule) == 0
     assert calls == [(None, "agendamento:fechamento_mensal")]  # None = mês anterior
 
 
 def test_month_close_rejects_future_month():
     with pytest.raises(Exception, match="ainda não começou"):
         cli.cmd_month_close(SimpleNamespace(month="2999-01", no_notify=True), AppConfig(settings=Settings(), platforms={}))
+
+
+# --- primeiro dia útil e fechamento uma vez por mês --------------------------------------------
+
+
+def test_business_days():
+    from datetime import date
+
+    from jervis.business_days import easter, first_business_day, is_business_day
+
+    assert [easter(y) for y in (2026, 2027, 2028)] == [date(2026, 4, 5), date(2027, 3, 28), date(2028, 4, 16)]
+    assert first_business_day(2026, 11) == date(2026, 11, 3)  # 1º domingo, 2 Finados
+    assert first_business_day(2027, 1) == date(2027, 1, 4)  # 1º feriado (sexta) + fim de semana
+    assert first_business_day(2026, 12) == date(2026, 12, 1)
+    assert not is_business_day(date(2027, 2, 9)) and not is_business_day(date(2026, 4, 3))  # Carnaval, Sexta-feira Santa
+
+
+def test_first_business_day_schedule():
+    from jervis import scheduling
+    from jervis.config import parse_config
+
+    config = parse_config({"platforms": {}, "schedules": {"fechamento_mensal": {
+        "frequency": "monthly", "day": "primeiro dia útil", "times": ["09:00"], "task": "relatorios_clientes"}}})
+    schedule = config.schedules["fechamento_mensal"]
+    assert schedule.day == "primeiro_dia_util"
+    assert scheduling.next_run(schedule, datetime(2026, 10, 13, 10, 0)) == datetime(2026, 11, 3, 9, 0)
+    assert scheduling.describe(schedule) == "mensalmente no primeiro dia útil às 09:00"
+    assert scheduling.create_commands(schedule, Path("x.cmd"))[0].endswith("/SC DAILY /ST 09:00")  # o Agendador não conhece dia útil
+    assert not scheduling.is_due(schedule, datetime(2026, 11, 2).date()) and scheduling.is_due(schedule, datetime(2026, 11, 4).date())
+
+
+def schedule_at(when, monkeypatch, tmp_path):
+    """Executa o agendamento do fechamento como se fosse ``when``; devolve as chamadas ao fechamento."""
+    class Fixed(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return when
+
+    monkeypatch.setattr(cli, "datetime", Fixed)
+    monkeypatch.setattr(closing, "datetime", Fixed)
+    calls = []
+    monkeypatch.setattr(cli, "_month_close", lambda config, month, origin, notify=True: calls.append(origin) or 0)
+    schedule = ScheduleConfig(name="fechamento_mensal", frequency="monthly", day="primeiro_dia_util", times=["09:00"],
+                              task="relatorios_clientes")
+    assert cli._run_schedule(AppConfig(settings=Settings(output_dir=str(tmp_path)), platforms={}), schedule) == 0
+    return calls
+
+
+def test_scheduled_close_runs_once_from_the_first_business_day(monkeypatch, tmp_path, capsys):
+    assert schedule_at(datetime(2026, 11, 2, 9, 0), monkeypatch, tmp_path) == []  # Finados: ainda não
+    assert "ainda não é o primeiro dia útil" in capsys.readouterr().out
+    assert schedule_at(datetime(2026, 11, 3, 9, 0), monkeypatch, tmp_path) == ["agendamento:fechamento_mensal"]
+    closing.done_marker(tmp_path, "2026-10").parent.mkdir(parents=True)
+    closing.done_marker(tmp_path, "2026-10").write_text("{}", encoding="utf-8")
+    assert schedule_at(datetime(2026, 11, 4, 9, 0), monkeypatch, tmp_path) == []  # já feito: não repete
+    assert "Fechamento de 2026-10 já feito" in capsys.readouterr().out
+
+
+def test_close_month_writes_the_done_marker(monkeypatch, tmp_path):
+    monkeypatch.setattr(repository, "record_report", lambda *a, **k: 1)
+    run_customer, _ = fake_runner(partial={"2"})
+    config = AppConfig(settings=Settings(output_dir=str(tmp_path)), platforms={})
+    closing.close_month(config, None, FakeConn(), None, run_customer, lambda c: [Customer(1, "C1", None), Customer(2, "C2", None)],
+                        emit=lambda line: None, now=NOW)
+    marker = json.loads(closing.done_marker(tmp_path, "2026-09").read_text(encoding="utf-8"))
+    assert marker["competencia"] == "2026-09" and marker["resultados"] == {"C1": "sucesso", "C2": "parcial"}

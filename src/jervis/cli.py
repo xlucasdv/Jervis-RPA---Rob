@@ -897,6 +897,17 @@ def _run_schedule(config: AppConfig, schedule: ScheduleConfig) -> int:
         print(f"Agendamento '{schedule.name}' está desativado; nada a fazer.")
         return EXIT_OK
     if schedule.task == "relatorios_clientes":  # fechamento mensal dos relatórios por cliente
+        from jervis.api import closing
+
+        today = datetime.now().date()
+        if not scheduling.is_due(schedule, today):
+            print(f"{today:%d/%m/%Y}: ainda não é o primeiro dia útil do mês; nada a fazer.")
+            return EXIT_OK
+        month = closing.previous_month()
+        marker = closing.done_marker(config.settings.output_dir, month)
+        if marker.exists():  # o disparo dos dias seguintes (ou a recuperação de horário perdido) não repete
+            print(f"Fechamento de {month} já feito ({marker}); nada a fazer.")
+            return EXIT_OK
         return _month_close(config, None, f"agendamento:{schedule.name}")
     platforms = _platforms_from(schedule.platforms, config)
     if not platforms:

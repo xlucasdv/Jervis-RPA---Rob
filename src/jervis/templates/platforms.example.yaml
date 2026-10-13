@@ -130,7 +130,7 @@ schedules:
     enabled: false
     task: relatorios_clientes  # coleta (padrão) | relatorios_clientes
     frequency: monthly         # daily | weekly | hourly | monthly
-    day: 1                     # dia do mês (1 a 28)
+    day: primeiro_dia_util     # dia do mês (1 a 28) ou primeiro_dia_util (seg-sex, fora feriados nacionais)
     times: ["06:00"]
   # semanal:
   #   frequency: weekly

@@ -130,7 +130,7 @@ jervis schedule run fechamento_mensal  # fechamento mensal agora (mês anterior)
 
 ## Fechamento mensal e revisão
 
-No dia 1 às 06:00 (agendamento `fechamento_mensal`), o Jervis gera os relatórios do **mês anterior** de todos os
+No primeiro dia útil do mês, às 09:00 (agendamento `fechamento_mensal`; dia e horário em `schedules`), o Jervis gera os relatórios do **mês anterior** de todos os
 clientes vinculados (Relatório Mensal, Relatório Executivo e `resumo.md`), registra cada um como **pendente de
 revisão** e avisa a equipe no Teams. A equipe revisa, aprova e envia ao cliente; o Jervis registra quem aprovou
 e quando.
@@ -153,9 +153,15 @@ jervis reviews approve "#12"            # pelo número da revisão (#id), em vez
 - O aviso no Teams traz quantos relatórios aguardam revisão e lista os clientes com falha ou com alguma
   plataforma que falhou. Configure a URL do fluxo do Teams com `jervis notify set-webhook` e `webhook: true` em
   `notifications`. Sem canal configurado, o fechamento roda e só avisa no terminal e no log.
-- Para o fechamento rodar às 06:00 do dia 1, a máquina precisa estar ligada, com a sessão do usuário aberta (ou a
-  tarefa configurada para rodar desconectada) e o **Docker Desktop** em execução (banco MySQL). A saída fica em
-  `logs/agendamento-fechamento_mensal.log`.
+- Cada mês é fechado uma vez: ao terminar, o Jervis grava `output/fechamentos/AAAA-MM.json`, e os disparos
+  seguintes encerram sem fazer nada. Para fechar de novo um mês, use `jervis month-close --month AAAA-MM` (manual,
+  sempre roda). Para pular um mês, crie o arquivo desse mês.
+- Para o fechamento rodar no horário, a máquina precisa estar ligada, com a sessão do usuário aberta (ou a
+  tarefa configurada para rodar desconectada) e o **Docker Desktop** em execução (banco MySQL). Se o horário for
+  perdido (PC desligado, ex.: dia 1 num domingo), a tarefa roda assim que o usuário entrar no Windows: o
+  `jervis schedule install` liga a opção "executar o mais rápido possível se um início agendado for perdido" em
+  todas as tarefas. Se o Docker ainda estiver subindo nesse momento, rode `jervis month-close` depois. A saída fica
+  em `logs/agendamento-fechamento_mensal.log`.
 - Aprovações, rejeições e fechamentos ficam na auditoria (`jervis audit --event relatorio`).
 
 ## Monitoramento da própria ferramenta

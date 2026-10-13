@@ -162,7 +162,8 @@ def test_install_registers_active_schedules(tmp_path, monkeypatch):
     })
     fake = FakeSchtasks()
     commands = scheduling.install(config, run=fake)
-    assert len(commands) == 2 and fake.calls == commands
+    assert len(commands) == 4 and fake.calls == commands  # 2 tarefas + "executar se perder o horário" em cada uma
+    assert commands[2].startswith("powershell") and "StartWhenAvailable = $true" in commands[2]
     assert (tmp_path / "agendamentos" / "diaria.cmd").exists()
     assert not (tmp_path / "agendamentos" / "desligada.cmd").exists()
 
@@ -171,7 +172,7 @@ def test_install_dry_run_and_failures(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     config = app_config(tmp_path, {"diaria": {"frequency": "daily", "times": ["07:00"]}})
     fake = FakeSchtasks()
-    assert len(scheduling.install(config, run=fake, dry_run=True)) == 1
+    assert len(scheduling.install(config, run=fake, dry_run=True)) == 2
     assert fake.calls == [] and not (tmp_path / "agendamentos").exists()
     with pytest.raises(ConfigError, match="não cadastrado"):
         scheduling.install(config, ["outra"], run=fake, dry_run=True)
@@ -180,6 +181,12 @@ def test_install_dry_run_and_failures(tmp_path, monkeypatch):
     if __import__("sys").platform == "win32":
         with pytest.raises(scheduling.SchedulerError, match="Acesso negado"):
             scheduling.install(config, run=FakeSchtasks(fail=True))
+
+
+def test_missed_run_is_recovered_when_the_user_signs_in():
+    command = scheduling.catch_up_command("Jervis3000\\hml\\fechamento_mensal")
+    assert "-TaskPath '\\Jervis3000\\hml\\' -TaskName 'fechamento_mensal'" in command
+    assert r"$s.StartWhenAvailable = $true; Set-ScheduledTask -TaskPath '\Jervis3000\hml\' -TaskName 'fechamento_mensal' -Settings $s" in command
 
 
 def test_installed_tasks_and_uninstall():

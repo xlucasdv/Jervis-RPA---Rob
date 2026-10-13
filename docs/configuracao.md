@@ -353,9 +353,13 @@ schedules:
   fechamento_mensal:
     task: relatorios_clientes      # coleta (padrão: coleta pelo navegador) | relatorios_clientes
     frequency: monthly
-    day: 1                         # dia do mês, de 1 a 28
-    times: ["06:00"]
+    day: primeiro_dia_util         # dia do mês (1 a 28) ou primeiro_dia_util
+    times: ["09:00"]
 ```
+
+`day: primeiro_dia_util`: segunda a sexta, fora os feriados nacionais, a Sexta-feira Santa e o Carnaval (feriados
+estaduais e municipais não entram). Como o Agendador do Windows não conhece dia útil, a tarefa dispara todo dia no
+horário e só trabalha a partir do primeiro dia útil, uma vez por mês.
 
 `task: relatorios_clientes` é o **fechamento mensal**: gera os relatórios do mês anterior de todos os clientes
 vinculados, deixa cada um pendente de revisão e avisa a equipe ([fechamento e revisão](execucao.md#fechamento-mensal-e-revisão)).

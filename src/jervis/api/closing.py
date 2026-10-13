@@ -8,6 +8,7 @@ aprovação (``jervis reviews approve``).
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -99,6 +100,11 @@ def summary_message(period_label: str, outcomes: list[Outcome], limit: int = 30)
     return subject, "\n".join(lines), status
 
 
+def done_marker(output_dir: str | Path, month: str) -> Path:
+    """Registro de que o fechamento do mês foi feito: evita repetir quando o agendamento dispara de novo."""
+    return Path(output_dir) / "fechamentos" / f"{month}.json"
+
+
 def close_month(config, store, conn, notifier, run_customer: Callable, reportable: Callable, month: str | None = None,
                 origin: str = "manual", user: str | None = None, emit: Callable[[str], None] = print,
                 now: datetime | None = None) -> list[Outcome]:
@@ -109,6 +115,13 @@ def close_month(config, store, conn, notifier, run_customer: Callable, reportabl
     emit(f"Fechamento de {period.short}: {len(customers)} cliente(s)")
     outcomes = run_customers(config, store, conn, customers, period, run_customer, origin=origin, user=user, emit=emit)
     subject, body, status = summary_message(period.short, outcomes)
+    if config is not None:
+        marker = done_marker(config.settings.output_dir, f"{period.since:%Y-%m}")
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"competencia": f"{period.since:%Y-%m}", "concluido_em": datetime.now().isoformat(timespec="seconds"),
+                                      "origem": origin, "usuario": user,
+                                      "resultados": {o.customer: o.resultado for o in outcomes}}, ensure_ascii=False, indent=1),
+                          encoding="utf-8")
     emit("")
     emit(subject)
     if notifier is not None:

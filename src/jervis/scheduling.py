@@ -19,11 +19,12 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
-from jervis.config import WEEKDAYS, AppConfig, ScheduleConfig
+from jervis.business_days import first_business_day
+from jervis.config import FIRST_BUSINESS_DAY, WEEKDAYS, AppConfig, ScheduleConfig
 from jervis.errors import ConfigError, JervisError
 
 TASK_FOLDER = "Jervis3000"
@@ -51,7 +52,8 @@ def next_run(schedule: ScheduleConfig, after: datetime) -> datetime:
     if schedule.frequency == "monthly":
         year, month = after.year, after.month
         for _ in range(3):
-            day = after.replace(year=year, month=month, day=schedule.day)
+            number = first_business_day(year, month).day if schedule.day == FIRST_BUSINESS_DAY else schedule.day
+            day = after.replace(year=year, month=month, day=number)
             candidates += [t for t in (_at(day, hhmm) for hhmm in schedule.times) if t > after]
             if candidates:
                 break
@@ -81,7 +83,8 @@ def describe(schedule: ScheduleConfig) -> str:
     if schedule.frequency == "daily":
         return f"diariamente às {times}"
     if schedule.frequency == "monthly":
-        return f"mensalmente no dia {schedule.day} às {times}"
+        when = "no primeiro dia útil" if schedule.day == FIRST_BUSINESS_DAY else f"no dia {schedule.day}"
+        return f"mensalmente {when} às {times}"
     if schedule.frequency == "weekly":
         return f"semanalmente ({', '.join(_DAY_LABEL[d] for d in schedule.days)}) às {times}"
     return f"a cada {schedule.every_hours} hora(s) a partir das {schedule.start}"
@@ -111,12 +114,30 @@ def create_commands(schedule: ScheduleConfig, wrapper: Path, env: str | None = N
             f"/RI {schedule.every_hours * 60} /DU 23:59"
         ]
     days = (f" /D {','.join(d.upper() for d in schedule.days)}" if schedule.frequency == "weekly"
-            else f" /D {schedule.day}" if schedule.frequency == "monthly" else "")
-    trigger = {"weekly": "WEEKLY", "monthly": "MONTHLY"}.get(schedule.frequency, "DAILY")
+            else f" /D {schedule.day}" if schedule.frequency == "monthly" and schedule.day != FIRST_BUSINESS_DAY else "")
+    # O Agendador não conhece dia útil (e o disparo mensal aceita um só dia): o primeiro dia útil dispara todo dia
+    # e a tarefa só trabalha a partir dele, uma vez por mês (ver is_due e o registro do fechamento feito)
+    trigger = "DAILY" if schedule.day == FIRST_BUSINESS_DAY else {"weekly": "WEEKLY", "monthly": "MONTHLY"}.get(schedule.frequency, "DAILY")
     return [
         f'schtasks /Create /F /TN "{name}" {target} /SC {trigger}{days} /ST {hhmm}'
         for name, hhmm in zip(task_names(schedule, env), schedule.times)
     ]
+
+
+def is_due(schedule: ScheduleConfig, today: date) -> bool:
+    """Para o primeiro dia útil: o disparo diário só vale a partir dele (dias antes, no mesmo mês, não)."""
+    return schedule.day != FIRST_BUSINESS_DAY or today >= first_business_day(today.year, today.month)
+
+
+def catch_up_command(task: str) -> str:
+    """Liga "executar assim que possível se um horário agendado for perdido" (PC desligado no horário: roda quando
+    o usuário entrar). O schtasks não tem essa opção na criação; o PowerShell (ScheduledTasks) ajusta depois, só
+    nas configurações: regravar a tarefa inteira (-InputObject) falha com gatilho mensal."""
+    folder, name = task.rsplit("\\", 1)
+    where = f"-TaskPath '\\{folder}\\' -TaskName '{name}'"
+    script = (f"$s = (Get-ScheduledTask {where}).Settings; $s.StartWhenAvailable = $true; "
+              f"Set-ScheduledTask {where} -Settings $s | Out-Null")
+    return f'powershell -NoProfile -NonInteractive -Command "{script}"'
 
 
 def write_wrapper(
@@ -173,7 +194,8 @@ def install(
     for schedule in schedules:
         wrapper = (write_wrapper(schedule, config.path, env=env) if not dry_run
                    else Path.cwd() / WRAPPER_DIR / (env or "") / f"{schedule.name}.cmd")
-        for command in create_commands(schedule, wrapper, env):
+        steps = create_commands(schedule, wrapper, env) + [catch_up_command(t) for t in task_names(schedule, env)]
+        for command in steps:
             commands.append(command)
             if not dry_run:
                 proc = run(command, capture_output=True, text=True)
