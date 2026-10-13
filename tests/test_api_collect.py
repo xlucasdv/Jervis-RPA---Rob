@@ -234,7 +234,7 @@ def test_run_customer_with_fake_apis(tmp_path, monkeypatch):
 def test_run_customer_without_api_services(monkeypatch):
     monkeypatch.setattr(repository, "find_customer", lambda conn, ref: repository.Customer(2, "Passebus", None))
     monkeypatch.setattr(repository, "list_services", lambda conn: [])
-    with pytest.raises(repository.RecordError, match="não está vinculado a Acronis nem Zabbix"):
+    with pytest.raises(repository.RecordError, match="não está vinculado a Acronis, Sophos nem Zabbix"):
         run_customer(AppConfig(settings=Settings(), platforms={}), None, None, "Passebus")
 
 

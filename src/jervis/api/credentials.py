@@ -25,6 +25,7 @@ class Field:
 
 API_FIELDS: dict[str, tuple[Field, ...]] = {
     "acronis": (Field("client_id", "Client ID do cliente de API", secret=False), Field("client_secret", "Client secret")),
+    "sophos": (Field("client_id", "Client ID da credencial de API do Sophos Central", secret=False), Field("client_secret", "Client secret")),
     "zabbix": (Field("token", "Token de API do Zabbix"),),
     "deskmanager": (Field("operator_key", "Chave de API do Operador"), Field("environment_key", "Chave de API do Ambiente")),
 }

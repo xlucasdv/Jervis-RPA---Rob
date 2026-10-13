@@ -59,8 +59,9 @@ mantém atualizado o driver do Edge ([instalação](docs/instalacao.md#driver-do
 | `jervis audit [--verify]` | Trilha de auditoria (quem coletou e quem alterou a configuração) |
 | `jervis config show` | Configuração efetiva (base + ambiente) |
 | `jervis customers add / list / show / update / remove / link / unlink` | Clientes no banco e os serviços de cada um (com chave MFA criptografada) |
-| `jervis customers report <cliente> \| --all [--month AAAA-MM] [--ia]` | Coleta por API e gera o Relatório Mensal, o Relatório Executivo e o `resumo.md` (padrão: mês atual); `--all`: todos os clientes vinculados |
-| `jervis services clients <serviço> [--import]` | Clientes que existem no Acronis/Zabbix x cadastro; `--import` cadastra e vincula os que faltam |
+| `jervis services set-api-credentials / test-api <serviço>` | Credenciais de API no cofre (Acronis, Sophos Central, Zabbix, Desk Manager) e teste de acesso |
+| `jervis customers report <cliente> \| --all [--month AAAA-MM] [--ia]` | Coleta por API (Acronis, Sophos Central, Zabbix) e gera o Relatório Mensal, o Relatório Executivo e o `resumo.md` (padrão: mês atual); `--all`: todos os clientes vinculados |
+| `jervis services clients <serviço> [--import]` | Clientes que existem no Acronis/Sophos/Zabbix x cadastro; `--import` cadastra e vincula os que faltam |
 | `jervis ia set-key / delete-key` | Chave da API do Claude no cofre (texto opcional do relatório executivo) |
 | `jervis services add / list / update / remove` | Serviços (plataformas) no banco: url, slug, classe do coletor e configurações |
 | `jervis db init / status / set-credentials / generate-key` | Banco MySQL: tabelas, credenciais e chave que criptografa as chaves MFA |

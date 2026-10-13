@@ -368,6 +368,79 @@ def acronis_indicators(session, period: Period) -> tuple[dict[str, Any], list[Is
     return indicators, warnings
 
 
+# --- Sophos Central --------------------------------------------------------------------
+
+SOPHOS_HEALTH = {"good": "Bom", "suspicious": "Suspeito", "bad": "Ruim", "unknown": "Desconhecido"}
+SOPHOS_SEVERITY = {"high": "alta", "medium": "media", "low": "baixa"}
+
+
+def sophos_endpoint_row(item: dict[str, Any]) -> dict[str, Any]:
+    health, os_ = item.get("health") or {}, item.get("os") or {}
+    overall = health.get("overall")
+    threats, services = (health.get("threats") or {}).get("status"), (health.get("services") or {}).get("status")
+    isolation = item.get("isolation") or {}
+    protection = "; ".join(f"{label}: {SOPHOS_HEALTH.get(value, value)}" for label, value in
+                           (("Ameaças", threats), ("Serviços", services)) if value)
+    return {
+        "nome": item.get("hostname"),
+        "tipo": "Servidor" if item.get("type") == "server" or os_.get("isServer") else "Computador",
+        "sistema_operacional": os_.get("name") or os_.get("platform"),
+        "status_agente": SOPHOS_HEALTH.get(overall, overall),
+        "situacao_protecao": protection or None,
+        "saude": overall, "saude_ameacas": threats, "saude_servicos": services,
+        "ultima_comunicacao": item.get("lastSeenAt"),
+        "ultima_comunicacao_iso": local_iso(item.get("lastSeenAt")),
+        "ip": ", ".join(item.get("ipv4Addresses") or []) or None,
+        "ultimo_usuario": (item.get("associatedPerson") or {}).get("viaLogin") or (item.get("associatedPerson") or {}).get("name"),
+        "grupo": (item.get("group") or {}).get("name"),
+        "protecao_adulteracao": item.get("tamperProtectionEnabled"),
+        "isolado": isolation.get("status") == "isolated" if isolation else None,
+        "produtos": ", ".join(f"{p.get('code')} {p.get('version') or ''}".strip() for p in item.get("assignedProducts") or []) or None,
+    }
+
+
+def sophos_alert_row(alert: dict[str, Any]) -> dict[str, Any]:
+    severity = alert.get("severity")
+    return {
+        "data_hora": alert.get("raisedAt"),
+        "data_hora_iso": local_iso(alert.get("raisedAt")),
+        "severidade": SOPHOS_SEVERITY.get(severity, severity),
+        "tipo": alert.get("description") or humanize(alert.get("type") or ""),
+        "descricao": alert.get("description"),
+        "codigo": alert.get("type"),
+        "categoria": alert.get("category"),
+        "produto": alert.get("product"),
+        "dispositivo": (alert.get("managedAgent") or {}).get("name"),
+        "usuario": (alert.get("person") or {}).get("name"),
+        "situacao": alert.get("status"),
+    }
+
+
+def collect_sophos(api, platform: str, customer_name: str, period: Period | None = None,
+                   environment: str = "") -> CollectionResult:
+    """Endpoints (situação atual) e alertas gerados no período do tenant do cliente no Sophos Central."""
+    period = period or last_days(7)
+    result = CollectionResult(platform=platform, kind="sophos", environment=environment)
+    try:
+        tenant = api.customer_tenant(customer_name)
+    except ApiError as exc:
+        result.issues.append(_issue("cliente", exc))
+        result.finished_at = now_iso()
+        return result
+    steps = (("dispositivos", lambda: api.endpoints(tenant), sophos_endpoint_row),
+             ("alertas", lambda: api.alerts(tenant, period.since, period.until), sophos_alert_row))
+    for name, fetch, to_row in steps:
+        try:
+            result.datasets[name] = [to_row(item) for item in fetch()]
+        except ApiError as exc:
+            result.issues.append(_issue(name, exc))
+    result.summary = {"cliente_na_plataforma": tenant.get("name"), "periodo": period.label,
+                      "regiao_dados": tenant.get("dataRegion"),
+                      "observacao_alertas": "alertas gerados no período que a API do Sophos Central ainda lista"}
+    result.finished_at = now_iso()
+    return result
+
+
 # --- Zabbix -------------------------------------------------------------------------
 
 _ZABBIX_SEVERITY = {"5": "desastre", "4": "alta", "3": "media", "2": "atencao", "1": "informacao", "0": "nao_classificada"}

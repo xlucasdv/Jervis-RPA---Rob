@@ -38,6 +38,11 @@ def _join(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " e " + items[-1] if items else ""
 
 
+def _lower_first(text: str) -> str:
+    """Só a inicial em minúscula, para encaixar o título na frase sem perder siglas e nomes (Sophos, EDR)."""
+    return text[:1].lower() + text[1:]
+
+
 def _previous_value(evolution: list[dict[str, Any]], label: str) -> Any:
     return next((e["anterior"] for e in evolution if e["indicador"] == label), None)
 
@@ -124,6 +129,23 @@ def panels(m: dict[str, Any], evolution: list[dict[str, Any]]) -> list[dict[str,
         if alerts["pouco_espaco_disco"]["quantidade"]:
             rows.append(("Pouco espaço em disco", n(alerts["pouco_espaco_disco"]["quantidade"]), "Pode bloquear atualizações e o agente de segurança."))
         out.append({"titulo": "Patches e Alertas da Console", "linhas": rows})
+    s = first(m, "sophos")
+    if s:
+        ep, health, alerts = s["endpoints"], s["saude"], s["alertas"]
+        sev = alerts["por_severidade"]
+        rows = [("Endpoints gerenciados", n(ep["total"]), f"{ep['computadores']} computadores e {ep['servidores']} servidores no Sophos Central."),
+                ("Saúde boa", n(health["boa"]), f"{health['suspeita']} suspeita · {health['ruim']} ruim · {health['desconhecida']} desconhecida."),
+                ("Com ameaça ativa", n(s["ameacas_ativas"]["quantidade"]),
+                 _join(s["ameacas_ativas"]["maquinas"][:4]) + "." if s["ameacas_ativas"]["quantidade"] else "Nenhum endpoint com ameaça ativa."),
+                ("Serviços de proteção com falha", n(s["servicos_com_falha"]["quantidade"]),
+                 _join(s["servicos_com_falha"]["maquinas"][:4]) + "." if s["servicos_com_falha"]["quantidade"] else "Todos os serviços íntegros."),
+                ("Proteção contra adulteração desativada", n(s["adulteracao_desativada"]["quantidade"]),
+                 "Agente pode ser desligado ou removido." if s["adulteracao_desativada"]["quantidade"] else "Ativa em todos os endpoints."),
+                ("Sem comunicação recente", n(s["sem_comunicacao"]["quantidade"]), "Não recebem atualizações nem políticas." if s["sem_comunicacao"]["quantidade"] else "—")]
+        if s["isolados"]:
+            rows.append(("Endpoints isolados", n(s["isolados"]), "Isolados da rede pelo Sophos Central."))
+        rows.append(("Alertas no período", n(alerts["total"]), f"{sev['alta']} alta · {sev['media']} média · {sev['baixa']} baixa."))
+        out.append({"titulo": "Sophos Central — Proteção de Endpoints", "linhas": rows})
     if z:
         rows = [("Disponibilidade geral", f"{n(z['disponibilidade_geral'])}%" if z["disponibilidade_geral"] is not None else "não coletado",
                  "Média dos ativos monitorados pelo ping."),
@@ -143,6 +165,21 @@ def _context(rec: dict[str, Any], m: dict[str, Any], evolution: list[dict[str, A
     """(título, parágrafo de contexto de risco) de cada ponto de atenção."""
     a = first(m, "acronis") or {}
     key = rec["chave"]
+    sophos_texts = {
+        "sophos_ameacas": ("Ameaças ativas em endpoints (Sophos)", " Uma ameaça ativa indica malware ou comportamento malicioso ainda não "
+                           "limpo: o equipamento pode estar comprometido e servir de ponto de propagação para a rede."),
+        "sophos_servicos": ("Serviços de proteção do Sophos com falha", " Com os serviços parados, o endpoint deixa de detectar e bloquear "
+                            "ameaças, mesmo aparecendo como gerenciado no console."),
+        "sophos_alertas_altos": ("Alertas de severidade alta (Sophos)", " Alertas de severidade alta indicam eventos que exigem análise do "
+                                 "time de segurança."),
+        "sophos_adulteracao": ("Proteção contra adulteração desativada", " Sem essa proteção, um usuário ou um malware com privilégios pode "
+                               "desligar ou remover o agente de segurança."),
+        "sophos_sem_comunicacao": ("Endpoints sem comunicação (Sophos)", " Esses equipamentos não recebem atualizações nem políticas e "
+                                   "distorcem os indicadores do ambiente."),
+    }
+    if key in sophos_texts:
+        title, risk = sophos_texts[key]
+        return title, rec["ponto"] + risk
     alerts = a.get("alertas") or {}
     if key == "vulnerabilidades":
         v, vm = a["vulnerabilidades"], a.get("maquinas_vulneraveis") or {}
@@ -216,7 +253,7 @@ def _context(rec: dict[str, Any], m: dict[str, Any], evolution: list[dict[str, A
 
 
 def narrative(m: dict[str, Any], evolution: list[dict[str, Any]], follow: list[dict[str, Any]]) -> dict[str, Any]:
-    a, z = first(m, "acronis"), first(m, "zabbix")
+    a, s, z = first(m, "acronis"), first(m, "sophos"), first(m, "zabbix")
     client, period = m.get("cliente"), m.get("periodo") or ""
     recs = m.get("recomendacoes") or []
     summary = []
@@ -224,7 +261,7 @@ def narrative(m: dict[str, Any], evolution: list[dict[str, Any]], follow: list[d
     for contract in (m.get("contrato") or {}).values():
         if contract.get("produtos"):
             scope.append(_join(contract["produtos"]) + (f" ({contract['dispositivos']} dispositivos contratados)" if contract.get("dispositivos") else ""))
-    areas = ["segurança de endpoints"] if a else []
+    areas = ["segurança de endpoints"] if a or s else []
     if z:
         areas.append("monitoramento de infraestrutura")
     p1 = f"Este relatório consolida os indicadores de {_join(areas) or 'segurança'} da {client} referentes a {period.lower()}."
@@ -234,6 +271,10 @@ def narrative(m: dict[str, Any], evolution: list[dict[str, Any]], follow: list[d
         inv = a["inventario"]
         p1 += (f" O console Acronis registra {n(inv.get('gerenciados'))} dispositivos gerenciados, dos quais {n(inv.get('protegidos'))} "
                f"estão com proteção ativa e {n(inv.get('desprotegidos'))} encontram-se desprotegidos.")
+    if s:
+        ep, threats = s["endpoints"], s["ameacas_ativas"]["quantidade"]
+        p1 += (f" No Sophos Central são {n(ep['total'])} endpoints gerenciados ({n(ep['computadores'])} computadores e "
+               f"{n(ep['servidores'])} servidores), " + ("nenhum com ameaça ativa." if not threats else f"{n(threats)} com ameaça ativa."))
     summary.append(p1)
     if a and (a.get("ameacas") or a.get("incidentes_edr")):
         threats, inc = a.get("ameacas"), a.get("incidentes_edr")
@@ -259,7 +300,7 @@ def narrative(m: dict[str, Any], evolution: list[dict[str, Any]], follow: list[d
                        f"com {n(z['alarmes_no_periodo'])} alarmes disparados e {z['problemas_ativos']} problemas ativos ao fim do período.")
     high = [r for r in recs if r["criticidade"] == "alta"]
     if high:
-        titles = [_context(r, m, evolution)[0].lower() for r in high[:3]]
+        titles = [_lower_first(_context(r, m, evolution)[0]) for r in high[:3]]
         summary.append(f"O principal risco do ambiente está em {titles[0]}: {high[0]['ponto']}"
                        + (f" Somam-se a isso {_join(titles[1:])}." if len(titles) > 1 else "")
                        + " Esses pontos estão detalhados e priorizados nas seções seguintes.")
@@ -270,6 +311,8 @@ def narrative(m: dict[str, Any], evolution: list[dict[str, Any]], follow: list[d
     good = []
     if a and a.get("ameacas") and a["ameacas"]["nao_mitigadas"] == 0:
         good.append("todas as ameaças registradas no painel estão mitigadas")
+    if s and s["endpoints"]["total"] and not s["ameacas_ativas"]["quantidade"]:
+        good.append("nenhum endpoint do Sophos Central apresenta ameaça ativa")
     if z and (z.get("disponibilidade_geral") or 0) >= 99:
         good.append(f"a disponibilidade geral ficou em {n(z['disponibilidade_geral'])}%")
     improved = [e["indicador"].lower() for e in evolution if e["leitura"] == "melhora"][:2]
@@ -277,7 +320,7 @@ def narrative(m: dict[str, Any], evolution: list[dict[str, Any]], follow: list[d
         good.append("houve melhora em " + _join(improved))
     closing += (_join(good) + ". " if good else "o ambiente manteve a operação monitorada. ")
     if high:
-        closing += "O risco, porém, segue concentrado em " + _join([_context(r, m, evolution)[0].lower() for r in high[:3]]) + ". "
+        closing += "O risco, porém, segue concentrado em " + _join([_lower_first(_context(r, m, evolution)[0]) for r in high[:3]]) + ". "
     if follow:
         closing += (f"{pending} das {len(follow)} recomendações do ciclo anterior permanecem pendentes. " if pending else
                     "As recomendações do ciclo anterior foram tratadas. ")

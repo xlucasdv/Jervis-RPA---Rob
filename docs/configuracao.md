@@ -197,6 +197,25 @@ jervis services remove acronis                   # só sem clientes vinculados
 ```
 
 - `--class`: um tipo de coletor (`acronis`, `sophos`, `zabbix`) ou o caminho de uma classe (`pacote.modulo.Classe`).
+- Uma plataforma pode ter mais de uma conta (ex.: Acronis em dois datacenters): cadastre cada uma com um slug
+  próprio e a mesma classe (`jervis services add acronis-us --url https://us-cloud.acronis.com --class acronis`).
+
+### Acesso por API
+
+```powershell
+jervis services set-api-credentials acronis      # Acronis: client id e secret do cliente de API
+jervis services set-api-credentials sophos       # Sophos Central: client id e secret da credencial de API
+jervis services set-api-credentials zabbix       # Zabbix: token de API
+jervis services test-api sophos                  # testa o acesso (só leitura)
+```
+
+As credenciais de API ficam no cofre (`api:<slug>:<campo>`) ou em `JERVIS_API_<SLUG>_<CAMPO>`.
+
+**Sophos Central:** `jervis services add sophos --url https://api.central.sophos.com --class sophos`. Crie a
+credencial no Sophos Central (Partner Dashboard: Settings → API Credentials; conta única: Global Settings → API
+Credentials Management) com o perfil **Service Principal Read-Only**. Numa conta de parceiro, os clientes são os
+tenants (`jervis services clients sophos`). A coleta lê os endpoints (saúde, ameaças, serviços, proteção contra
+adulteração, última comunicação) e os alertas gerados no período que a API ainda lista.
 - `--set CHAVE=VALOR` aceita números, `true`/`false` e JSON; chaves que parecem credenciais são recusadas.
 - A chave MFA nunca é exibida: nem na listagem, nem na auditoria.
 
@@ -247,6 +266,7 @@ Cada execução gera, em `output\clientes\<cliente>\<data-hora>\`, três produto
 ```powershell
 jervis services clients acronis                     # clientes do Acronis e a situação de cada um no cadastro
 jervis services clients acronis --import            # cadastra os que faltam e cria o vínculo (pede confirmação)
+jervis services clients sophos                      # tenants do Sophos Central (conta de parceiro)
 jervis services clients zabbix --only "MERCOS"      # no Zabbix, cada cliente é um grupo de hosts: importe só os de cliente
 jervis customers report --all                       # relatório de todos os clientes vinculados, um após o outro
 ```

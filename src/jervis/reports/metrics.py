@@ -85,6 +85,38 @@ def acronis_metrics(result: dict[str, Any], records: list[dict[str, Any]]) -> di
     }
 
 
+def sophos_metrics(result: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
+    platform = result["platform"]
+    data = result.get("datasets") or {}
+    devices, alerts = data.get("dispositivos") or [], data.get("alertas") or []
+    device_records = [r for r in records if r["plataforma"] == platform and (r.get("origem") or "").startswith("dispositivos")]
+    stale = sorted(r["recurso"] for r in device_records if r["classificacao"] == "indisponivel" and r.get("recurso"))
+    health = Counter(d.get("saude") or "unknown" for d in devices)
+
+    def names(rows):
+        found = sorted({d.get("nome") for d in rows if d.get("nome")})
+        return {"quantidade": len(rows), "maquinas": found}
+
+    high = [a for a in alerts if a.get("severidade") == "alta"]
+    return {
+        "endpoints": {"total": len(devices), "computadores": sum(1 for d in devices if d.get("tipo") == "Computador"),
+                      "servidores": sum(1 for d in devices if d.get("tipo") == "Servidor")},
+        "saude": {"boa": health["good"], "suspeita": health["suspicious"], "ruim": health["bad"], "desconhecida": health["unknown"]},
+        "ameacas_ativas": names([d for d in devices if d.get("saude_ameacas") in ("bad", "suspicious")]),
+        "servicos_com_falha": names([d for d in devices if d.get("saude_servicos") in ("bad", "suspicious")]),
+        "adulteracao_desativada": names([d for d in devices if d.get("protecao_adulteracao") is False]),
+        "isolados": sum(1 for d in devices if d.get("isolado")),
+        "sem_comunicacao": {"quantidade": len(stale), "maquinas": stale},
+        "alertas": {
+            "total": len(alerts),
+            "por_severidade": {s: sum(1 for a in alerts if a.get("severidade") == s) for s in ("alta", "media", "baixa")},
+            "por_categoria": [{"categoria": c, "quantidade": q} for c, q in Counter(a.get("categoria") or "outros" for a in alerts).most_common(8)],
+            "por_tipo": [{"titulo": t, "quantidade": q} for t, q in Counter(a.get("tipo") for a in alerts).most_common(10)],
+            "maquinas_alta": sorted({a.get("dispositivo") for a in high if a.get("dispositivo")}),
+        },
+    }
+
+
 def zabbix_metrics(result: dict[str, Any]) -> dict[str, Any]:
     data = result.get("datasets") or {}
     hosts, problems, availability = data.get("hosts") or [], data.get("problemas") or [], data.get("disponibilidade") or []
@@ -117,6 +149,8 @@ def compute(results: list[dict[str, Any]], consolidated: dict[str, Any], meta: d
             continue
         if kind == "acronis":
             metrics["plataformas"][result["platform"]] = {"tipo": "acronis", **acronis_metrics(result, records)}
+        elif kind == "sophos":
+            metrics["plataformas"][result["platform"]] = {"tipo": "sophos", **sophos_metrics(result, records)}
         elif kind == "zabbix":
             metrics["plataformas"][result["platform"]] = {"tipo": "zabbix", **zabbix_metrics(result)}
         for issue in result.get("issues") or []:
@@ -193,6 +227,34 @@ def recommendations(metrics: dict[str, Any]) -> list[dict[str, Any]]:
         if summary.get("perifericos_bloqueados"):
             add("perifericos", "baixa", f"{summary['perifericos_bloqueados']} tentativa(s) de uso de periféricos bloqueada(s).",
                 "Revisar com o cliente se a política de periféricos está adequada às necessidades das áreas.")
+    s = first(metrics, "sophos")
+    if s:
+        def few(items):
+            return ", ".join(items[:5]) + (" e outros" if len(items) > 5 else "")
+        threats, services = s["ameacas_ativas"], s["servicos_com_falha"]
+        if threats["quantidade"]:
+            add("sophos_ameacas", "alta", f"{threats['quantidade']} endpoint(s) com ameaça ativa no Sophos Central ({few(threats['maquinas'])}).",
+                "Investigar e limpar as ameaças no Sophos Central e confirmar a remediação em cada endpoint.")
+        if services["quantidade"]:
+            add("sophos_servicos", "alta", f"{services['quantidade']} endpoint(s) com serviços de proteção do Sophos parados ou com falha "
+                f"({few(services['maquinas'])}).",
+                "Reiniciar ou reinstalar o agente Sophos nesses endpoints e confirmar que os serviços voltaram a ficar íntegros.")
+        high = s["alertas"]["por_severidade"]["alta"]
+        if high:
+            machines = s["alertas"]["maquinas_alta"]
+            add("sophos_alertas_altos", "alta", f"{high} alerta(s) de severidade alta no Sophos Central no período"
+                + (f" ({few(machines)})." if machines else "."),
+                "Tratar os alertas de severidade alta e confirmar a resolução no console do Sophos Central.")
+        tamper = s["adulteracao_desativada"]
+        if tamper["quantidade"]:
+            add("sophos_adulteracao", "media", f"{tamper['quantidade']} endpoint(s) com a proteção contra adulteração desativada "
+                f"({few(tamper['maquinas'])}).",
+                "Reativar a proteção contra adulteração (Tamper Protection) para impedir que o agente seja desligado ou removido.")
+        stale = s["sem_comunicacao"]
+        if stale["quantidade"]:
+            add("sophos_sem_comunicacao", "media", f"{stale['quantidade']} endpoint(s) sem comunicação recente com o Sophos Central "
+                f"({few(stale['maquinas'])}).",
+                "Verificar com o cliente se os equipamentos seguem em uso: reconectar os ativos e remover do console os desativados.")
     z = first(metrics, "zabbix")
     if z:
         if z["abaixo_95"]:
@@ -272,6 +334,13 @@ def evolution(current: dict[str, Any], before: dict[str, Any] | None) -> list[di
             compare("Mitigações manuais (incidentes)", base + ("incidentes_edr", "manuais"), flow=True)
             compare("Máquinas com falha de patch", base + ("patches", "maquinas_com_falha"), flow=True)
             compare("URLs maliciosas bloqueadas", base + ("resumo_periodo", "urls_maliciosas_bloqueadas"), flow=True)
+        elif m.get("tipo") == "sophos":
+            compare("Endpoints Sophos gerenciados", base + ("endpoints", "total"), lower_is_better=False)
+            compare("Endpoints Sophos com ameaça ativa", base + ("ameacas_ativas", "quantidade"))
+            compare("Endpoints Sophos com serviços com falha", base + ("servicos_com_falha", "quantidade"))
+            compare("Endpoints Sophos sem proteção contra adulteração", base + ("adulteracao_desativada", "quantidade"))
+            compare("Endpoints Sophos sem comunicação", base + ("sem_comunicacao", "quantidade"))
+            compare("Alertas Sophos de severidade alta", base + ("alertas", "por_severidade", "alta"), flow=True)
         elif m.get("tipo") == "zabbix":
             compare("Disponibilidade geral (%)", base + ("disponibilidade_geral",), lower_is_better=False, flow=True)
             compare("Problemas ativos", base + ("problemas_ativos",))

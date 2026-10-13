@@ -243,10 +243,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--products", help="produtos contratados, separados por ';' (vazio \"\" apaga)")
     p.add_argument("--contracted", type=int, help="quantidade de dispositivos contratados (0 apaga)")
     p.set_defaults(handler=cmd_customers_link)
-    p = cust.add_parser("report", help="relatório geral do cliente coletado por API (Acronis e Zabbix)")
+    p = cust.add_parser("report", help="relatório geral do cliente coletado por API (Acronis, Sophos Central e Zabbix)")
     p.add_argument("customer", nargs="?", help="id, id do Desk Manager ou nome")
     p.add_argument("--all", dest="all_customers", action="store_true",
-                   help="todos os clientes vinculados a Acronis ou Zabbix, um após o outro")
+                   help="todos os clientes vinculados a Acronis, Sophos ou Zabbix, um após o outro")
     period = p.add_mutually_exclusive_group()
     period.add_argument("--month", help="mês AAAA-MM (padrão: o mês atual, até hoje)")
     period.add_argument("--days", type=int, help="em vez do mês: últimos N dias")
@@ -283,7 +283,7 @@ def _build_parser() -> argparse.ArgumentParser:
     group.add_argument("--mfa", action="store_true", help="pede a chave MFA da conta de parceiro (oculta) e grava criptografada")
     group.add_argument("--clear-mfa", action="store_true", help="apaga a chave MFA da conta de parceiro")
     p.set_defaults(handler=cmd_services_update)
-    p = svc.add_parser("set-api-credentials", help="credenciais de API do serviço no cofre (Acronis: client id/secret; "
+    p = svc.add_parser("set-api-credentials", help="credenciais de API do serviço no cofre (Acronis e Sophos: client id/secret; "
                                                     "Zabbix: token; Desk Manager: chaves do Operador e do Ambiente)")
     p.add_argument("slug")
     p.set_defaults(handler=cmd_services_set_api_credentials)
@@ -1231,7 +1231,7 @@ def _report_all(config: AppConfig, reportable_customers, run_customer, period, f
     with _db(config) as conn:
         customers = reportable_customers(conn)
         if not customers:
-            print("Nenhum cliente vinculado a Acronis ou Zabbix. Veja 'jervis services clients acronis --import'.")
+            print("Nenhum cliente vinculado a Acronis, Sophos ou Zabbix. Veja 'jervis services clients acronis --import'.")
             return EXIT_OK
         print(f"{len(customers)} cliente(s): {', '.join(c.name for c in customers)}\n")
         for index, customer in enumerate(customers, 1):

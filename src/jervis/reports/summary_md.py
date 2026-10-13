@@ -28,10 +28,48 @@ def n(value: Any) -> str:
     return f"{value:,}".replace(",", ".") if isinstance(value, int) else str(value)
 
 
+def _machines(group: dict[str, Any], limit: int = 12) -> str:
+    names = group.get("maquinas") or []
+    return f" ({', '.join(names[:limit])}{' e outras' if len(names) > limit else ''})" if names else ""
+
+
+def sophos_section(s: dict[str, Any]) -> list[str]:
+    ep, health, alerts = s["endpoints"], s["saude"], s["alertas"]
+    sev = alerts["por_severidade"]
+    out = ["## Endpoint Protection (Sophos Central)", "", "### Métricas do período",
+           f"- Endpoints gerenciados: {n(ep['total'])} ({n(ep['computadores'])} computadores | {n(ep['servidores'])} servidores)",
+           f"- Saúde dos endpoints: {n(health['boa'])} boa | {n(health['suspeita'])} suspeita | {n(health['ruim'])} ruim | "
+           f"{n(health['desconhecida'])} desconhecida",
+           f"- Endpoints com ameaça ativa: {n(s['ameacas_ativas']['quantidade'])}{_machines(s['ameacas_ativas'])}",
+           f"- Endpoints com serviços de proteção com falha: {n(s['servicos_com_falha']['quantidade'])}{_machines(s['servicos_com_falha'])}",
+           f"- Proteção contra adulteração desativada: {n(s['adulteracao_desativada']['quantidade'])}{_machines(s['adulteracao_desativada'])}",
+           f"- Endpoints isolados: {n(s['isolados'])}",
+           f"- Endpoints sem comunicação recente: {n(s['sem_comunicacao']['quantidade'])}{_machines(s['sem_comunicacao'])}",
+           f"- Alertas gerados no período: {n(alerts['total'])} ({n(sev['alta'])} alta | {n(sev['media'])} média | {n(sev['baixa'])} baixa)"]
+    if alerts["por_categoria"]:
+        out.append("- Alertas por categoria: " + "; ".join(f"{c['categoria']}: {c['quantidade']}" for c in alerts["por_categoria"]))
+    if alerts["por_tipo"]:
+        out.append("- Principais alertas: " + "; ".join(f"{t['titulo']} ({t['quantidade']})" for t in alerts["por_tipo"][:5]))
+    out += ["", "### Anomalias e pontos de atenção"]
+    anomalies = []
+    if s["ameacas_ativas"]["quantidade"]:
+        anomalies.append(f"**Ameaças Ativas:** {s['ameacas_ativas']['quantidade']} endpoints com ameaça ainda não limpa.")
+    if s["servicos_com_falha"]["quantidade"]:
+        anomalies.append(f"**Serviços de Proteção com Falha:** {s['servicos_com_falha']['quantidade']} endpoints.")
+    if sev["alta"]:
+        anomalies.append(f"**Alertas de Severidade Alta:** {sev['alta']} no período" + _machines({"maquinas": alerts["maquinas_alta"]}, 8) + ".")
+    if s["adulteracao_desativada"]["quantidade"]:
+        anomalies.append(f"**Proteção contra Adulteração Desativada:** {s['adulteracao_desativada']['quantidade']} endpoints.")
+    if s["sem_comunicacao"]["quantidade"]:
+        anomalies.append(f"**Endpoints sem Comunicação:** {s['sem_comunicacao']['quantidade']} sem contato recente com o console.")
+    out += [f"- {x}" for x in anomalies] or ["- Nenhuma anomalia relevante no período."]
+    return out + ["", "---", ""]
+
+
 def render(metrics: dict[str, Any], evolution: list[dict[str, Any]], follow: list[dict[str, Any]]) -> str:
     client, period = metrics.get("cliente") or "Cliente", metrics.get("periodo_curto") or metrics.get("periodo") or ""
     out = [f"# Resumo MSR – {client} – {period}", ""]
-    a, z = first(metrics, "acronis"), first(metrics, "zabbix")
+    a, s, z = first(metrics, "acronis"), first(metrics, "sophos"), first(metrics, "zabbix")
 
     # contexto
     out += ["## Contexto do Ambiente"]
@@ -48,6 +86,10 @@ def render(metrics: dict[str, Any], evolution: list[dict[str, Any]], follow: lis
         sessions = a.get("sessoes_remotas")
         if sessions:
             context.append(f"No período, foram contabilizadas {n(sessions['total'])} sessões remotas de suporte.")
+    if s:
+        ep = s["endpoints"]
+        context.append(f"O Sophos Central protege {n(ep['total'])} endpoints ({n(ep['computadores'])} computadores e "
+                       f"{n(ep['servidores'])} servidores).")
     if z:
         context.append(f"O monitoramento (Zabbix) cobre {n(z['hosts'])} ativos, com disponibilidade geral de "
                        f"{n(z['disponibilidade_geral'])}% no período.")
@@ -151,6 +193,9 @@ def render(metrics: dict[str, Any], evolution: list[dict[str, Any]], follow: lis
             anomalies.append(f"**Alertas de Espaço em Disco:** {alerts['pouco_espaco_disco']['quantidade']} dispositivos com pouco espaço livre.")
         out += [f"- {x}" for x in anomalies] or ["- Nenhuma anomalia relevante no período."]
         out += ["", "---", ""]
+
+    if s:
+        out += sophos_section(s)
 
     if z:
         out += ["## Monitoramento de Infraestrutura (Zabbix)", "", "### Métricas do período",

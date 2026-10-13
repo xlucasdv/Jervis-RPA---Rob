@@ -20,7 +20,7 @@ from jervis.fileutil import atomic_write_text
 from jervis.reports.slides import load_notes
 from jervis.runner import consolidate_run, generate_run_reports
 
-COLLECTABLE = ("acronis", "zabbix")
+COLLECTABLE = ("acronis", "sophos", "zabbix")
 
 
 @dataclasses.dataclass
@@ -47,7 +47,7 @@ def slug(text: str) -> str:
 
 
 def reportable_customers(conn) -> list[repository.Customer]:
-    """Clientes vinculados a pelo menos um serviço coletável por API (Acronis ou Zabbix), por nome."""
+    """Clientes vinculados a pelo menos um serviço coletável por API (Acronis, Sophos ou Zabbix), por nome."""
     services = {s.slug: s for s in repository.list_services(conn)}
     return [c for c in repository.list_customers(conn)
             if any(slug in services and services[slug].class_identifier in COLLECTABLE for slug in c.services)]
@@ -63,7 +63,7 @@ def run_customer(config: AppConfig, store: CredentialStore, conn, customer_ref: 
     links = [services[s] for s in customer.services if s in services and services[s].class_identifier in COLLECTABLE]
     if not links:
         raise repository.RecordError(
-            f"O cliente '{customer.name}' não está vinculado a Acronis nem Zabbix. Use 'jervis customers link'.")
+            f"O cliente '{customer.name}' não está vinculado a Acronis, Sophos nem Zabbix. Use 'jervis customers link'.")
 
     run_dir = Path(config.settings.output_dir) / "clientes" / slug(customer.name) / datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -76,6 +76,8 @@ def run_customer(config: AppConfig, store: CredentialStore, conn, customer_ref: 
             api = builder(service, store)
             if service.class_identifier == "acronis":
                 result = collect.collect_acronis(api, service.slug, name_on, period)
+            elif service.class_identifier == "sophos":
+                result = collect.collect_sophos(api, service.slug, name_on, period)
             else:
                 result = collect.collect_zabbix(api, service.slug, name_on, period)
         except (ApiError, CredentialError) as exc:

@@ -179,4 +179,4 @@ def test_api_credentials_vault_and_env(memory_keyring):
     env = {api_credentials.env_name("acronis", "client_secret"): "da-variavel"}
     assert api_credentials.load(store, "acronis", "acronis", environ=env)["client_secret"].reveal() == "da-variavel"
     with pytest.raises(CredentialError, match="não tem acesso por API"):
-        api_credentials.fields_for("sophos")
+        api_credentials.fields_for("pacote.modulo.Classe")
