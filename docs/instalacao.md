@@ -60,14 +60,20 @@ Sem acesso a `msedgedriver.microsoft.com`, faça manualmente:
 ## Banco de dados e fila (MySQL e RabbitMQ)
 
 Os dois rodam em contêineres Docker (`docker-compose.yml`), acessíveis só desta máquina. As senhas não ficam em
-arquivo: são definidas no terminal antes de subir.
+arquivo: são definidas no terminal antes de subir pela **primeira vez**. O texto entre aspas é só a pergunta
+exibida; a senha é digitada depois, oculta (funciona no Windows PowerShell 5.1 e no PowerShell 7):
 
 ```powershell
-$env:JERVIS_MYSQL_ROOT_PASSWORD = Read-Host "Senha root do MySQL" -MaskInput
-$env:JERVIS_MYSQL_PASSWORD      = Read-Host "Senha do usuário jervis no MySQL" -MaskInput
-$env:JERVIS_RABBITMQ_PASSWORD   = Read-Host "Senha do usuário jervis no RabbitMQ" -MaskInput
+function Ask($p) { $s = Read-Host $p -AsSecureString; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)) }
+$env:JERVIS_MYSQL_ROOT_PASSWORD = Ask "Senha root do MySQL"
+$env:JERVIS_MYSQL_PASSWORD      = Ask "Senha do usuario jervis no MySQL"
+$env:JERVIS_RABBITMQ_PASSWORD   = Ask "Senha do usuario jervis no RabbitMQ"
 docker compose up -d                                   # Docker Desktop precisa estar aberto
 ```
+
+Nas vezes seguintes (contêineres já criados), basta abrir o Docker Desktop: os contêineres voltam sozinhos
+(`restart: unless-stopped`) ou com `docker start jervis-mysql jervis-rabbitmq`, sem senha. Para o Docker abrir
+com o Windows: Docker Desktop → Settings → General → "Start Docker Desktop when you sign in".
 
 Depois, uma vez:
 

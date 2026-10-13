@@ -90,7 +90,7 @@ def sophos_metrics(result: dict[str, Any], records: list[dict[str, Any]]) -> dic
     data = result.get("datasets") or {}
     devices, alerts = data.get("dispositivos") or [], data.get("alertas") or []
     device_records = [r for r in records if r["plataforma"] == platform and (r.get("origem") or "").startswith("dispositivos")]
-    stale = sorted(r["recurso"] for r in device_records if r["classificacao"] == "indisponivel" and r.get("recurso"))
+    stale = [r["recurso"] for r in device_records if r["classificacao"] == "indisponivel" and r.get("recurso")]
     health = Counter(d.get("saude") or "unknown" for d in devices)
 
     def names(rows):
@@ -98,19 +98,24 @@ def sophos_metrics(result: dict[str, Any], records: list[dict[str, Any]]) -> dic
         return {"quantidade": len(rows), "maquinas": found}
 
     high = [a for a in alerts if a.get("severidade") == "alta"]
+    repeated = sorted(name for name, count in Counter(d.get("nome") for d in devices if d.get("nome")).items() if count > 1)
     return {
         "endpoints": {"total": len(devices), "computadores": sum(1 for d in devices if d.get("tipo") == "Computador"),
                       "servidores": sum(1 for d in devices if d.get("tipo") == "Servidor")},
         "saude": {"boa": health["good"], "suspeita": health["suspicious"], "ruim": health["bad"], "desconhecida": health["unknown"]},
-        "ameacas_ativas": names([d for d in devices if d.get("saude_ameacas") in ("bad", "suspicious")]),
+        "ameacas_ativas": names([d for d in devices if d.get("saude_ameacas") == "bad"]),
+        "itens_suspeitos": names([d for d in devices if d.get("saude_ameacas") == "suspicious"]),  # ex.: PUA aguardando limpeza
         "servicos_com_falha": names([d for d in devices if d.get("saude_servicos") in ("bad", "suspicious")]),
         "adulteracao_desativada": names([d for d in devices if d.get("protecao_adulteracao") is False]),
         "isolados": sum(1 for d in devices if d.get("isolado")),
-        "sem_comunicacao": {"quantidade": len(stale), "maquinas": stale},
+        "offline_agora": sum(1 for d in devices if d.get("online") is False),
+        "sem_comunicacao": {"quantidade": len(stale), "maquinas": sorted(set(stale))},  # registros; nomes sem repetição
+        "nomes_repetidos": {"quantidade": len(repeated), "maquinas": repeated},
         "alertas": {
             "total": len(alerts),
             "por_severidade": {s: sum(1 for a in alerts if a.get("severidade") == s) for s in ("alta", "media", "baixa")},
             "por_categoria": [{"categoria": c, "quantidade": q} for c, q in Counter(a.get("categoria") or "outros" for a in alerts).most_common(8)],
+            "por_produto": dict(Counter(a.get("produto") or "outros" for a in alerts).most_common()),
             "por_tipo": [{"titulo": t, "quantidade": q} for t, q in Counter(a.get("tipo") for a in alerts).most_common(10)],
             "maquinas_alta": sorted({a.get("dispositivo") for a in high if a.get("dispositivo")}),
         },
@@ -235,6 +240,11 @@ def recommendations(metrics: dict[str, Any]) -> list[dict[str, Any]]:
         if threats["quantidade"]:
             add("sophos_ameacas", "alta", f"{threats['quantidade']} endpoint(s) com ameaça ativa no Sophos Central ({few(threats['maquinas'])}).",
                 "Investigar e limpar as ameaças no Sophos Central e confirmar a remediação em cada endpoint.")
+        suspicious = s.get("itens_suspeitos") or {}
+        if suspicious.get("quantidade"):
+            add("sophos_suspeitos", "media", f"{suspicious['quantidade']} endpoint(s) com item suspeito pendente no Sophos Central "
+                f"({few(suspicious['maquinas'])}), como aplicativo potencialmente indesejado (PUA) aguardando limpeza.",
+                "Revisar os itens suspeitos no Sophos Central: concluir a limpeza ou autorizar o que for legítimo.")
         if services["quantidade"]:
             add("sophos_servicos", "alta", f"{services['quantidade']} endpoint(s) com serviços de proteção do Sophos parados ou com falha "
                 f"({few(services['maquinas'])}).",
@@ -250,6 +260,11 @@ def recommendations(metrics: dict[str, Any]) -> list[dict[str, Any]]:
             add("sophos_adulteracao", "media", f"{tamper['quantidade']} endpoint(s) com a proteção contra adulteração desativada "
                 f"({few(tamper['maquinas'])}).",
                 "Reativar a proteção contra adulteração (Tamper Protection) para impedir que o agente seja desligado ou removido.")
+        repeated = s.get("nomes_repetidos") or {}
+        if repeated.get("quantidade"):
+            add("sophos_registros_repetidos", "baixa", f"{repeated['quantidade']} nome(s) de endpoint com mais de um registro no Sophos Central "
+                f"({few(repeated['maquinas'])}), em geral de máquinas reinstaladas.",
+                "Remover do console os registros antigos para que licenças e indicadores reflitam só os equipamentos ativos.")
         stale = s["sem_comunicacao"]
         if stale["quantidade"]:
             add("sophos_sem_comunicacao", "media", f"{stale['quantidade']} endpoint(s) sem comunicação recente com o Sophos Central "
@@ -337,6 +352,7 @@ def evolution(current: dict[str, Any], before: dict[str, Any] | None) -> list[di
         elif m.get("tipo") == "sophos":
             compare("Endpoints Sophos gerenciados", base + ("endpoints", "total"), lower_is_better=False)
             compare("Endpoints Sophos com ameaça ativa", base + ("ameacas_ativas", "quantidade"))
+            compare("Endpoints Sophos com item suspeito pendente", base + ("itens_suspeitos", "quantidade"))
             compare("Endpoints Sophos com serviços com falha", base + ("servicos_com_falha", "quantidade"))
             compare("Endpoints Sophos sem proteção contra adulteração", base + ("adulteracao_desativada", "quantidade"))
             compare("Endpoints Sophos sem comunicação", base + ("sem_comunicacao", "quantidade"))

@@ -1360,8 +1360,13 @@ def cmd_services_clients(args: argparse.Namespace, config: AppConfig) -> int:
         except ApiError as exc:
             print(f"[FALHA] {service.slug}: {redact(str(exc))}")
             return EXIT_FAILURE
+        try:
+            aliases = api.customer_aliases() if hasattr(api, "customer_aliases") else {}
+        except ApiError as exc:
+            print(f"[FALHA] {service.slug}: {redact(str(exc))}")
+            return EXIT_FAILURE
         customers = repository.list_customers(conn)
-        rows = sync.compare(names, customers, service.slug)
+        rows = sync.compare(names, customers, service.slug, aliases)
         if args.only:
             wanted = {n.strip().lower() for n in args.only}
             rows = [r for r in rows if r.name.lower() in wanted]
@@ -1373,7 +1378,7 @@ def cmd_services_clients(args: argparse.Namespace, config: AppConfig) -> int:
         counts = {status: sum(r.status == status for r in rows) for status in (sync.LINKED, sync.UNLINKED, sync.NEW, sync.AMBIGUOUS)}
         print(f"\n{len(rows)} cliente(s) em {service.slug}: " + ", ".join(f"{n} {s}" for s, n in counts.items() if n))
         if not args.only:
-            for c in sync.orphans(names, customers, service.slug):
+            for c in sync.orphans(names, customers, service.slug, aliases):
                 print(f"Atenção: {c.name} está vinculado a {service.slug} como '{c.name_on(service.slug)}', que não existe "
                       f"na plataforma. Ajuste com 'jervis customers link {c.id} {service.slug} --external-name ...'.")
         if counts[sync.AMBIGUOUS]:

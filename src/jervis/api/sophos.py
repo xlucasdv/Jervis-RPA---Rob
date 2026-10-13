@@ -78,16 +78,32 @@ class SophosApi:
     def customer_names(self) -> list[str]:
         return sorted({(t.get("name") or "").strip() for t in self.tenants()} - {""}, key=str.lower)
 
+    def customer_aliases(self) -> dict[str, str]:
+        """Outras formas de apontar um tenant no vínculo (id e "showAs") → nome do tenant."""
+        aliases = {}
+        for t in self.tenants():
+            for alias in (t.get("id"), t.get("showAs")):
+                if alias and t.get("name"):
+                    aliases[alias.strip()] = t["name"].strip()
+        return aliases
+
     def customer_tenant(self, name: str) -> dict[str, Any]:
-        """Tenant do cliente pelo nome exibido no Sophos Central (sem diferenciar maiúsculas)."""
-        tenants = self.tenants()
-        found = [t for t in tenants if (t.get("name") or "").strip().lower() == name.strip().lower()]
+        """Tenant do cliente pelo id, pelo "showAs" ou pelo nome exibido no Sophos Central (sem diferenciar
+        maiúsculas). Com nomes repetidos, o vínculo precisa do id do tenant."""
+        tenants, wanted = self.tenants(), name.strip().lower()
+        found = ([t for t in tenants if (t.get("id") or "").lower() == wanted]
+                 or [t for t in tenants if (t.get("showAs") or "").strip().lower() == wanted  # só quando difere do nome
+                     and (t.get("showAs") or "").strip().lower() != (t.get("name") or "").strip().lower()]
+                 or [t for t in tenants if (t.get("name") or "").strip().lower() == wanted])
         if len(found) == 1:
             if not found[0].get("apiHost"):
                 raise ApiError(f"[sophos] O tenant '{name}' não informa o endereço dos dados (apiHost).")
             return found[0]
         if found:
-            raise ApiError(f"[sophos] Há {len(found)} clientes chamados '{name}' no Sophos Central.")
+            options = "; ".join(f"{t['id']} (região {t.get('dataRegion') or '?'}, faturamento {t.get('billingType') or '?'}, "
+                                f"{len(t.get('products') or [])} produto(s))" for t in found)
+            raise ApiError(f"[sophos] Há {len(found)} tenants chamados '{name}' no Sophos Central: {options}. "
+                           "Escolha um com 'jervis customers link <cliente> <serviço> --external-name <id do tenant>'.")
         similar = [t["name"] for t in tenants if name.strip().lower()[:4] in (t.get("name") or "").lower()]
         raise ApiError(f"[sophos] Cliente '{name}' não encontrado no Sophos Central."
                        + (f" Parecidos: {', '.join(similar)}." if similar else "")

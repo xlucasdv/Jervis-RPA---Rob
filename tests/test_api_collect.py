@@ -93,8 +93,9 @@ class FakeAcronis:
         return self._maybe_fail("alertas", ALERTS)
 
     def _maybe_fail(self, name, value):
-        if name in self.fail:
-            raise ApiError(self.fail[name], 503)
+        if name in self.fail:  # mensagem, ou (mensagem, status HTTP)
+            message, status = self.fail[name] if isinstance(self.fail[name], tuple) else (self.fail[name], 503)
+            raise ApiError(message, status)
         return value
 
 
@@ -301,3 +302,10 @@ def test_acronis_period_filters_alerts_and_activities():
     september = collect.collect_acronis(FakeAcronis([machine("A")]), "acronis", "c", collect.month("2026-09"))
     assert september.datasets["alertas"] == [] and september.datasets["atividades"] == []
     assert len(september.datasets["maquinas"]) == 1  # máquinas: situação atual, não filtrada por período
+
+
+def test_acronis_feature_outside_the_license_is_named_as_such():
+    forbidden = ('[acronis] GET /bc/api/...: HTTP 403 – {"domain": "licensing", "code": "Forbidden", "debug": {"msg": "Feature not available"}}', 403)
+    result = collect.collect_acronis(FakeAcronis([machine("A")], fail={"protecao": forbidden}), "acronis", "c")
+    assert "protecao" not in result.summary["indicadores"]
+    assert any(i.message == "protecao: recurso não licenciado para este cliente no Acronis (indicador fora do relatório)." for i in result.issues)

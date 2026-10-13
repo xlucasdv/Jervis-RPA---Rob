@@ -21,10 +21,19 @@ def _key(text: str) -> str:
     return (text or "").strip().lower()
 
 
-def compare(names: list[str], customers: list[repository.Customer], slug: str) -> list[PlatformCustomer]:
+def _linked_name(customer: repository.Customer, slug: str, aliases: dict[str, str]) -> str:
+    """Nome na plataforma do vínculo; se o vínculo usa um apelido (ex.: id do tenant), o nome correspondente."""
+    name = customer.name_on(slug)
+    return {_key(k): v for k, v in aliases.items()}.get(_key(name), name)
+
+
+def compare(names: list[str], customers: list[repository.Customer], slug: str,
+            aliases: dict[str, str] | None = None) -> list[PlatformCustomer]:
     """Situação de cada cliente da plataforma no cadastro: vinculado (pelo nome na plataforma do vínculo),
-    cadastrado com o mesmo nome mas sem vínculo, ou não cadastrado."""
-    linked = {_key(c.name_on(slug)): c for c in customers if slug in c.services}
+    cadastrado com o mesmo nome mas sem vínculo, ou não cadastrado. ``aliases``: outras formas de apontar um
+    cliente na plataforma (ex.: id do tenant no Sophos) → nome."""
+    aliases = aliases or {}
+    linked = {_key(_linked_name(c, slug, aliases)): c for c in customers if slug in c.services}
     by_name: dict[str, list[repository.Customer]] = {}
     for c in customers:
         by_name.setdefault(_key(c.name), []).append(c)
@@ -43,10 +52,11 @@ def compare(names: list[str], customers: list[repository.Customer], slug: str) -
     return rows
 
 
-def orphans(names: list[str], customers: list[repository.Customer], slug: str) -> list[repository.Customer]:
+def orphans(names: list[str], customers: list[repository.Customer], slug: str,
+            aliases: dict[str, str] | None = None) -> list[repository.Customer]:
     """Clientes vinculados ao serviço cujo nome na plataforma não existe mais nela (renomeado ou removido)."""
     found = {_key(n) for n in names}
-    return [c for c in customers if slug in c.services and _key(c.name_on(slug)) not in found]
+    return [c for c in customers if slug in c.services and _key(_linked_name(c, slug, aliases or {})) not in found]
 
 
 def import_missing(conn, rows: list[PlatformCustomer], slug: str) -> list[tuple[str, bool]]:

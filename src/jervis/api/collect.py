@@ -274,6 +274,11 @@ def acronis_indicators(session, period: Period) -> tuple[dict[str, Any], list[Is
             indicators[name] = fetch()
             indicators["fontes"][name] = source
         except ApiError as exc:
+            if exc.status == 403 and "Feature not available" in str(exc):  # recurso fora da licença do cliente
+                warnings.append(Issue(f"indicadores/{name}", IssueCategory.INCOMPLETE_DATA,
+                                      f"{name}: recurso não licenciado para este cliente no Acronis (indicador fora do relatório).",
+                                      severity=WARNING))
+                return
             where = "API interna do console (não documentada)" if source == "api_interna" else "API"
             warnings.append(Issue(f"indicadores/{name}", IssueCategory.UNAVAILABLE,
                                   f"{name}: não foi possível ler pela {where}: {exc}", severity=WARNING))
@@ -372,6 +377,9 @@ def acronis_indicators(session, period: Period) -> tuple[dict[str, Any], list[Is
 
 SOPHOS_HEALTH = {"good": "Bom", "suspicious": "Suspeito", "bad": "Ruim", "unknown": "Desconhecido"}
 SOPHOS_SEVERITY = {"high": "alta", "medium": "media", "low": "baixa"}
+SOPHOS_ALERT_STATUS = {"open": "Aberto", "resolved": "Resolvido", "closed": "Fechado"}
+SOPHOS_PRODUCT = {"endpoint": "Endpoint", "server": "Servidor", "firewall": "Firewall", "mobile": "Mobile", "email": "E-mail",
+                  "wireless": "Wireless", "ztna": "ZTNA", "xgEmail": "E-mail", "iaas": "Nuvem"}
 
 
 def sophos_endpoint_row(item: dict[str, Any]) -> dict[str, Any]:
@@ -382,9 +390,11 @@ def sophos_endpoint_row(item: dict[str, Any]) -> dict[str, Any]:
     protection = "; ".join(f"{label}: {SOPHOS_HEALTH.get(value, value)}" for label, value in
                            (("Ameaças", threats), ("Serviços", services)) if value)
     return {
+        "id": item.get("id"),
         "nome": item.get("hostname"),
         "tipo": "Servidor" if item.get("type") == "server" or os_.get("isServer") else "Computador",
-        "sistema_operacional": os_.get("name") or os_.get("platform"),
+        "sistema_operacional": (os_.get("name") or os_.get("platform") or "").strip() or None,
+        "online": item.get("online"),
         "status_agente": SOPHOS_HEALTH.get(overall, overall),
         "situacao_protecao": protection or None,
         "saude": overall, "saude_ameacas": threats, "saude_servicos": services,
@@ -409,10 +419,10 @@ def sophos_alert_row(alert: dict[str, Any]) -> dict[str, Any]:
         "descricao": alert.get("description"),
         "codigo": alert.get("type"),
         "categoria": alert.get("category"),
-        "produto": alert.get("product"),
+        "produto": SOPHOS_PRODUCT.get(alert.get("product"), alert.get("product")),
         "dispositivo": (alert.get("managedAgent") or {}).get("name"),
         "usuario": (alert.get("person") or {}).get("name"),
-        "situacao": alert.get("status"),
+        "situacao": SOPHOS_ALERT_STATUS.get(alert.get("status"), alert.get("status")),
     }
 
 

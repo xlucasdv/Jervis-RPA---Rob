@@ -1,10 +1,13 @@
 # MySQL e RabbitMQ locais para o Jervis3000.
 #
-# As senhas NÃO ficam neste arquivo: defina as variáveis no terminal antes de subir (PowerShell):
-#   $env:JERVIS_MYSQL_ROOT_PASSWORD = Read-Host "Senha root do MySQL" -MaskInput
-#   $env:JERVIS_MYSQL_PASSWORD      = Read-Host "Senha do usuário jervis no MySQL" -MaskInput
-#   $env:JERVIS_RABBITMQ_PASSWORD   = Read-Host "Senha do usuário jervis no RabbitMQ" -MaskInput
+# As senhas NÃO ficam neste arquivo: defina as variáveis no terminal antes de subir pela primeira vez
+# (PowerShell 5.1 ou 7; o texto entre aspas é só a pergunta, a senha é digitada depois, oculta):
+#   function Ask($p) { $s = Read-Host $p -AsSecureString; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)) }
+#   $env:JERVIS_MYSQL_ROOT_PASSWORD = Ask "Senha root do MySQL"
+#   $env:JERVIS_MYSQL_PASSWORD      = Ask "Senha do usuario jervis no MySQL"
+#   $env:JERVIS_RABBITMQ_PASSWORD   = Ask "Senha do usuario jervis no RabbitMQ"
 #   docker compose up -d
+# Depois de criados, os contêineres voltam sozinhos com o Docker Desktop (ou: docker start jervis-mysql jervis-rabbitmq).
 # As portas só aceitam conexões desta máquina (127.0.0.1).
 
 services:

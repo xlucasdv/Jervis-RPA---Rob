@@ -147,7 +147,10 @@ def sophos_device(row: dict[str, Any], ctx: Context) -> StandardRecord:
     agent, protection = row.get("status_agente"), row.get("situacao_protecao")
     status = _join(f"Agente: {agent}" if agent else None, f"Proteção: {protection}" if protection else None)
     last_seen = row.get("ultima_comunicacao_iso")
-    common = dict(status=status, data_evento=last_seen, data_original=row.get("ultima_comunicacao"))
+    # pela API cada registro tem id próprio (máquinas reinstaladas deixam registros antigos com o mesmo nome);
+    # na coleta pelo navegador não há id, e o nome identifica o dispositivo repetido entre páginas
+    common = dict(status=status, data_evento=last_seen, data_original=row.get("ultima_comunicacao"),
+                  chave=(row["id"],) if row.get("id") else ())
 
     if matches(protection, _SOPHOS_CRITICAL) or matches(agent, _SOPHOS_CRITICAL):
         return record(ctx, ENDPOINT, row.get("nome"), CRITICAL, mensagem=f"Proteção comprometida ({status}).", **common)

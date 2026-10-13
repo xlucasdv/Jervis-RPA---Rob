@@ -36,16 +36,26 @@ def _machines(group: dict[str, Any], limit: int = 12) -> str:
 def sophos_section(s: dict[str, Any]) -> list[str]:
     ep, health, alerts = s["endpoints"], s["saude"], s["alertas"]
     sev = alerts["por_severidade"]
-    out = ["## Endpoint Protection (Sophos Central)", "", "### Métricas do período",
-           f"- Endpoints gerenciados: {n(ep['total'])} ({n(ep['computadores'])} computadores | {n(ep['servidores'])} servidores)",
-           f"- Saúde dos endpoints: {n(health['boa'])} boa | {n(health['suspeita'])} suspeita | {n(health['ruim'])} ruim | "
-           f"{n(health['desconhecida'])} desconhecida",
-           f"- Endpoints com ameaça ativa: {n(s['ameacas_ativas']['quantidade'])}{_machines(s['ameacas_ativas'])}",
-           f"- Endpoints com serviços de proteção com falha: {n(s['servicos_com_falha']['quantidade'])}{_machines(s['servicos_com_falha'])}",
-           f"- Proteção contra adulteração desativada: {n(s['adulteracao_desativada']['quantidade'])}{_machines(s['adulteracao_desativada'])}",
-           f"- Endpoints isolados: {n(s['isolados'])}",
-           f"- Endpoints sem comunicação recente: {n(s['sem_comunicacao']['quantidade'])}{_machines(s['sem_comunicacao'])}",
-           f"- Alertas gerados no período: {n(alerts['total'])} ({n(sev['alta'])} alta | {n(sev['media'])} média | {n(sev['baixa'])} baixa)"]
+    out = ["## Sophos Central", "", "### Métricas do período"]
+    if ep["total"]:
+        out += [f"- Endpoints gerenciados: {n(ep['total'])} ({n(ep['computadores'])} computadores | {n(ep['servidores'])} servidores)",
+                f"- Saúde dos endpoints: {n(health['boa'])} boa | {n(health['suspeita'])} suspeita | {n(health['ruim'])} ruim | "
+                f"{n(health['desconhecida'])} desconhecida",
+                f"- Endpoints com ameaça ativa: {n(s['ameacas_ativas']['quantidade'])}{_machines(s['ameacas_ativas'])}",
+                f"- Endpoints com item suspeito pendente (ex.: PUA): {n((s.get('itens_suspeitos') or {}).get('quantidade'))}"
+                f"{_machines(s.get('itens_suspeitos') or {})}",
+                f"- Endpoints com serviços de proteção com falha: {n(s['servicos_com_falha']['quantidade'])}{_machines(s['servicos_com_falha'])}",
+                f"- Proteção contra adulteração desativada: {n(s['adulteracao_desativada']['quantidade'])}{_machines(s['adulteracao_desativada'])}",
+                f"- Endpoints offline no momento da coleta: {n(s.get('offline_agora'))}",
+                f"- Endpoints isolados: {n(s['isolados'])}",
+                f"- Endpoints sem comunicação recente: {n(s['sem_comunicacao']['quantidade'])}{_machines(s['sem_comunicacao'])}"]
+        if (s.get("nomes_repetidos") or {}).get("quantidade"):
+            out.append(f"- Nomes com mais de um registro no console: {n(s['nomes_repetidos']['quantidade'])}{_machines(s['nomes_repetidos'])}")
+    else:
+        out.append("- Endpoints gerenciados: 0 (nenhum computador ou servidor deste cliente no Sophos Central)")
+    out.append(f"- Alertas gerados no período: {n(alerts['total'])} ({n(sev['alta'])} alta | {n(sev['media'])} média | {n(sev['baixa'])} baixa)")
+    if alerts.get("por_produto"):
+        out.append("- Alertas por origem: " + "; ".join(f"{p}: {q}" for p, q in alerts["por_produto"].items()))
     if alerts["por_categoria"]:
         out.append("- Alertas por categoria: " + "; ".join(f"{c['categoria']}: {c['quantidade']}" for c in alerts["por_categoria"]))
     if alerts["por_tipo"]:
@@ -53,15 +63,17 @@ def sophos_section(s: dict[str, Any]) -> list[str]:
     out += ["", "### Anomalias e pontos de atenção"]
     anomalies = []
     if s["ameacas_ativas"]["quantidade"]:
-        anomalies.append(f"**Ameaças Ativas:** {s['ameacas_ativas']['quantidade']} endpoints com ameaça ainda não limpa.")
+        anomalies.append(f"**Ameaças Ativas:** {s['ameacas_ativas']['quantidade']} endpoint(s) com ameaça ainda não limpa.")
+    if (s.get("itens_suspeitos") or {}).get("quantidade"):
+        anomalies.append(f"**Itens Suspeitos Pendentes:** {s['itens_suspeitos']['quantidade']} endpoint(s){_machines(s['itens_suspeitos'], 8)}.")
     if s["servicos_com_falha"]["quantidade"]:
-        anomalies.append(f"**Serviços de Proteção com Falha:** {s['servicos_com_falha']['quantidade']} endpoints.")
+        anomalies.append(f"**Serviços de Proteção com Falha:** {s['servicos_com_falha']['quantidade']} endpoint(s).")
     if sev["alta"]:
         anomalies.append(f"**Alertas de Severidade Alta:** {sev['alta']} no período" + _machines({"maquinas": alerts["maquinas_alta"]}, 8) + ".")
     if s["adulteracao_desativada"]["quantidade"]:
-        anomalies.append(f"**Proteção contra Adulteração Desativada:** {s['adulteracao_desativada']['quantidade']} endpoints.")
+        anomalies.append(f"**Proteção contra Adulteração Desativada:** {s['adulteracao_desativada']['quantidade']} endpoint(s).")
     if s["sem_comunicacao"]["quantidade"]:
-        anomalies.append(f"**Endpoints sem Comunicação:** {s['sem_comunicacao']['quantidade']} sem contato recente com o console.")
+        anomalies.append(f"**Endpoints sem Comunicação:** {s['sem_comunicacao']['quantidade']} registro(s) sem contato recente com o console.")
     out += [f"- {x}" for x in anomalies] or ["- Nenhuma anomalia relevante no período."]
     return out + ["", "---", ""]
 
@@ -88,8 +100,12 @@ def render(metrics: dict[str, Any], evolution: list[dict[str, Any]], follow: lis
             context.append(f"No período, foram contabilizadas {n(sessions['total'])} sessões remotas de suporte.")
     if s:
         ep = s["endpoints"]
-        context.append(f"O Sophos Central protege {n(ep['total'])} endpoints ({n(ep['computadores'])} computadores e "
-                       f"{n(ep['servidores'])} servidores).")
+        if ep["total"]:
+            context.append(f"O Sophos Central protege {n(ep['total'])} endpoints ({n(ep['computadores'])} computadores e "
+                           f"{n(ep['servidores'])} servidores).")
+        else:
+            origins = ", ".join(f"{p} ({q})" for p, q in (s["alertas"].get("por_produto") or {}).items())
+            context.append("O Sophos Central não tem endpoints deste cliente" + (f"; os alertas do período vêm de: {origins}." if origins else "."))
     if z:
         context.append(f"O monitoramento (Zabbix) cobre {n(z['hosts'])} ativos, com disponibilidade geral de "
                        f"{n(z['disponibilidade_geral'])}% no período.")

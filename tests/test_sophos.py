@@ -1,6 +1,7 @@
 """Sophos Central por API: cliente (token, whoami, tenants, paginação), coleta, indicadores e documentos."""
 
 import io
+from types import SimpleNamespace
 import urllib.error
 from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
@@ -138,7 +139,7 @@ def test_sophos_metrics_and_recommendations():
 def test_sophos_in_summary_and_executive():
     m = compute()
     md = summary_md.render(m, [], [])
-    assert "## Endpoint Protection (Sophos Central)" in md and "Endpoints com ameaça ativa: 1 (PC-02)" in md
+    assert "## Sophos Central" in md and "Endpoints com ameaça ativa: 1 (PC-02)" in md
     assert "O Sophos Central protege 5 endpoints" in md
     doc = executive.build(m, [], [], company="Contego Security", issued=NOW)
     assert "Sophos Central — Proteção de Endpoints" in [p["titulo"] for p in doc["paineis"]]
@@ -171,4 +172,85 @@ def test_customer_report_with_sophos(tmp_path, monkeypatch):
     assert folder.parent.name == "auxilium_corretora"
     assert "Sophos Central" in (folder / "relatorio_mensal.html").read_text(encoding="utf-8")
     assert "Sophos Central — Proteção de Endpoints" in (folder / "relatorio_executivo.html").read_text(encoding="utf-8")
-    assert "## Endpoint Protection (Sophos Central)" in (folder / "resumo.md").read_text(encoding="utf-8")
+    assert "## Sophos Central" in (folder / "resumo.md").read_text(encoding="utf-8")
+
+
+# --- casos vistos na conta real ----------------------------------------------------------
+
+
+def test_duplicate_tenant_names_need_the_tenant_id():
+    sophos, _ = api()
+    twins = [{"id": "aaaa-1", "name": "Unimed Planalto Norte", "apiHost": REGION, "dataRegion": "br01", "billingType": "usage",
+              "products": [{"code": "NDR-MSP"}], "showAs": "Unimed Planalto Norte"},
+             {"id": "bbbb-2", "name": "Unimed Planalto Norte", "apiHost": REGION, "dataRegion": "us01", "billingType": "term",
+              "products": [], "showAs": "Unimed Planalto Norte (antigo)"}]
+    sophos.tenants = lambda: twins
+    with pytest.raises(ApiError, match=r"aaaa-1 \(região br01, faturamento usage, 1 produto\(s\)\); bbbb-2"):
+        sophos.customer_tenant("Unimed Planalto Norte")
+    assert sophos.customer_tenant("bbbb-2")["dataRegion"] == "us01"  # pelo id do tenant
+    assert sophos.customer_tenant("unimed planalto norte (antigo)")["id"] == "bbbb-2"  # pelo "showAs"
+    assert sophos.customer_aliases()["aaaa-1"] == "Unimed Planalto Norte"
+
+
+def test_link_by_tenant_id_counts_as_linked():
+    from jervis.api import sync
+    from jervis.db.repository import Customer
+
+    people = [Customer(24, "UNIMED PLANALTO NORTE", None, services=["sophos"], external={"sophos": "aaaa-1"})]
+    rows = sync.compare(["Unimed Planalto Norte"], people, "sophos", {"aaaa-1": "Unimed Planalto Norte"})
+    assert rows[0].status == sync.LINKED and rows[0].customer.id == 24  # e não "não cadastrado" (que duplicaria no import)
+    assert sync.orphans(["Unimed Planalto Norte"], people, "sophos", {"aaaa-1": "Unimed Planalto Norte"}) == []
+
+
+def test_firewall_only_tenant():
+    from jervis.api.sophos import SophosApi as _Api
+    firewall_alert = {"id": "f1", "category": "connectivity", "description": "IPSec Connection terminated", "severity": "medium",
+                      "type": "Event::Firewall::Connectivity", "raisedAt": "2026-10-05T13:00:00Z", "status": "open",
+                      "managedAgent": {"id": "fw", "type": "utm", "name": "X11509922DT2707"}, "product": "firewall"}
+    routes_fw = routes([])
+    routes_fw[("GET", "/endpoint/v1/endpoints")] = {"items": [], "pages": {"size": 50, "total": 0, "items": 0, "maxSize": 500}}
+    routes_fw[("GET", "/common/v1/alerts")] = {"items": [firewall_alert], "pages": {"size": 1, "maxSize": 100}}
+    sophos = _Api("https://api.central.sophos.com", secret("cid"), secret("s3cr3t"), opener=FakeApi(routes_fw))
+    period = collect.month("2026-10", now=NOW)
+    data = [collect.collect_sophos(sophos, "sophos", "AUXILIUM CORRETORA", period).to_dict()]
+    assert data[0]["datasets"]["alertas"][0]["produto"] == "Firewall" and data[0]["datasets"]["alertas"][0]["situacao"] == "Aberto"
+    m = metrics.compute(data, consolidate(data), {"cliente": "AUXILIUM CORRETORA", "periodo": period.label, "periodo_curto": period.short})
+    s = metrics.first(m, "sophos")
+    assert s["endpoints"]["total"] == 0 and s["alertas"]["por_produto"] == {"Firewall": 1}
+    md = summary_md.render(m, [], [])
+    assert "Endpoints gerenciados: 0 (nenhum computador ou servidor" in md and "Alertas por origem: Firewall: 1" in md
+    assert "Endpoints com ameaça ativa" not in md
+    doc = executive.build(m, [], [], company="Contego Security", issued=NOW)
+    assert [p["titulo"] for p in doc["paineis"]] == ["Sophos Central"]
+    assert "não há endpoints deste cliente na plataforma" in doc["sumario"][0] and "segurança de rede" in doc["sumario"][0]
+    assert "nenhum endpoint do Sophos Central apresenta ameaça ativa" not in doc["consideracoes"]
+
+
+def test_endpoints_with_the_same_name_are_kept_apart():
+    old, new = endpoint("FAT-02", last="2026-07-21T14:31:18Z"), endpoint("FAT-02")
+    old["id"], new["id"] = "id-antigo", "id-novo"
+    period = collect.month("2026-10", now=NOW)
+    result = collect.collect_sophos(SimpleNamespace(customer_tenant=lambda name: {"id": "t1", "name": name, "apiHost": REGION},
+                                                    endpoints=lambda t: [old, new], alerts=lambda t, a, b: []),
+                                    "sophos", "AUXILIUM CORRETORA", period)
+    data = [result.to_dict()]
+    consolidated = consolidate(data)
+    assert consolidated["validacao"]["duplicados_removidos"] == 0  # dois registros (ids diferentes), não um duplicado
+    m = metrics.compute(data, consolidated, {"cliente": "X", "periodo": period.label, "periodo_curto": period.short})
+    s = metrics.first(m, "sophos")
+    assert s["nomes_repetidos"] == {"quantidade": 1, "maquinas": ["FAT-02"]} and s["sem_comunicacao"]["maquinas"] == ["FAT-02"]
+    assert {r["chave"]: r["criticidade"] for r in m["recomendacoes"]}["sophos_registros_repetidos"] == "baixa"
+
+
+def test_suspicious_item_is_not_reported_as_an_active_threat():
+    pua = endpoint("QEE-04", overall="suspicious", threats="suspicious")
+    period = collect.month("2026-10", now=NOW)
+    result = collect.collect_sophos(SimpleNamespace(customer_tenant=lambda name: {"id": "t1", "name": name, "apiHost": REGION},
+                                                    endpoints=lambda t: [pua, endpoint("QEE-05")], alerts=lambda t, a, b: []),
+                                    "sophos", "CERMISSOES", period)
+    data = [result.to_dict()]
+    m = metrics.compute(data, consolidate(data), {"cliente": "CERMISSOES", "periodo": period.label, "periodo_curto": period.short})
+    s = metrics.first(m, "sophos")
+    assert s["ameacas_ativas"]["quantidade"] == 0 and s["itens_suspeitos"] == {"quantidade": 1, "maquinas": ["QEE-04"]}
+    assert {r["chave"]: r["criticidade"] for r in m["recomendacoes"]} == {"sophos_suspeitos": "media"}
+    assert "nenhum com ameaça ativa e 1 com item suspeito pendente." in executive.build(m, [], [], issued=NOW)["sumario"][0]
