@@ -196,6 +196,22 @@ jervis customers remove "MERCOS"                 # pede confirmação; leva os v
 jervis services remove acronis                   # só sem clientes vinculados
 ```
 
+### Limpeza do cadastro
+
+```powershell
+jervis customers duplicates                      # sugere duplicados e POCs/trials pelo nome (não altera nada)
+jervis customers merge 32 25                     # junta: vínculos e histórico do 32 vão para o 25; o 32 é apagado
+jervis customers deactivate 78 --reason "POC encerrada"   # fora do fechamento mensal e do --all
+jervis customers activate 78
+```
+
+- **Juntar** (`merge`) vale para o mesmo cliente em plataformas diferentes (ex.: Sophos num cadastro, Acronis no
+  outro). Cada vínculo mantém o nome do cliente na plataforma; o histórico de revisões vai junto. Dois cadastros
+  ligados ao **mesmo serviço** (dois tenants) não podem ser unidos: aponte o vínculo para o tenant certo
+  (`customers link ... --external-name`) e **inative** o que sobra.
+- Inativos continuam no cadastro e podem ter relatório gerado manualmente (`customers report <cliente>`); só
+  ficam fora do fechamento mensal e do `customers report --all`. `customers list` mostra a coluna ATIVO.
+
 - `--class`: um tipo de coletor (`acronis`, `sophos`, `zabbix`) ou o caminho de uma classe (`pacote.modulo.Classe`).
 - Uma plataforma pode ter mais de uma conta (ex.: Acronis em dois datacenters): cadastre cada uma com um slug
   próprio e a mesma classe (`jervis services add acronis-us --url https://us-cloud.acronis.com --class acronis`).
@@ -320,7 +336,7 @@ simples são substituídos.
 ```yaml
 schedules:
   diaria:
-    frequency: daily               # daily (diaria) | weekly (semanal) | hourly (horas)
+    frequency: daily               # daily (diaria) | weekly (semanal) | hourly (horas) | monthly (mensal)
     times: ["07:00", "18:00"]      # use aspas: sem elas o YAML pode ler 07:00 como número
   semanal:
     frequency: weekly
@@ -334,8 +350,15 @@ schedules:
     retries: 1                     # reprocessamentos automáticos (padrão 1)
     retry_delay_minutes: 10
     enabled: true
+  fechamento_mensal:
+    task: relatorios_clientes      # coleta (padrão: coleta pelo navegador) | relatorios_clientes
+    frequency: monthly
+    day: 1                         # dia do mês, de 1 a 28
+    times: ["06:00"]
 ```
 
+`task: relatorios_clientes` é o **fechamento mensal**: gera os relatórios do mês anterior de todos os clientes
+vinculados, deixa cada um pendente de revisão e avisa a equipe ([fechamento e revisão](execucao.md#fechamento-mensal-e-revisão)).
 Registro no Windows e operação: [Execução](execucao.md#agendamento).
 
 ## Notificações (`notifications`)
@@ -351,7 +374,7 @@ notifications:
     recipients: [ti@empresa.com.br, noc@empresa.com.br]
     username: jervis@empresa.com.br  # omita se o relay não exige autenticação
     attach_report: true            # anexa o relatorio.html (até 10 MB)
-  webhook: true
+  webhook: true                    # também avisa o fechamento mensal (sempre, sem o filtro de "when")
   webhook_format: teams            # teams (Workflows/Adaptive Card) | slack | json
 ```
 

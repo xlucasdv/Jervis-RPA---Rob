@@ -3,6 +3,8 @@ com o cadastro do Jervis, e a importação dos que faltam (cadastra o cliente e 
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 
 from jervis.db import repository
@@ -72,3 +74,43 @@ def import_missing(conn, rows: list[PlatformCustomer], slug: str) -> list[tuple[
             repository.link(conn, str(row.customer.id), slug)
             done.append((row.name, False))
     return done
+
+
+# --- cadastro: prováveis duplicados e clientes de teste ---------------------------------------
+
+# Palavras que não identificam o cliente (órgão, forma jurídica, preposições)
+_GENERIC = frozenset("""
+a as o os de da das do dos e em ltda sa s eireli me grupo prefeitura municipal municipio camara conselho regional
+instituto servico servicos autonomo federal estadual
+""".split())
+_UF = frozenset("ac al ap am ba ce df es go ma mt ms mg pa pb pr pe pi rj rn rs ro rr sc sp se to".split())
+_TEST_WORDS = frozenset({"poc", "trial", "teste", "test", "lab", "assessment", "demo", "homologacao"})
+
+
+def _tokens(name: str) -> list[str]:
+    text = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().lower()
+    return [t for t in re.split(r"[^a-z0-9]+", text) if t]
+
+
+def looks_like_test(name: str) -> bool:
+    """Nome de POC, trial, laboratório ou avaliação."""
+    return bool(_TEST_WORDS & set(_tokens(name)))
+
+
+def _name_key(name: str) -> tuple[str, set[str]]:
+    words = [t for t in _tokens(name) if t not in _GENERIC and t not in _TEST_WORDS]
+    return "".join(w for w in words if w not in _UF), {w for w in words if w in _UF}
+
+
+def probable_duplicates(customers: list[repository.Customer]) -> list[tuple[repository.Customer, repository.Customer]]:
+    """Pares de cadastros com nomes que parecem do mesmo cliente: iguais ou um começa com o outro, sem contar
+    palavras genéricas (prefeitura, ltda...) e com a mesma UF quando as duas informam (Coren RS ≠ Coren MT)."""
+    keys = [(c, *_name_key(c.name)) for c in customers]
+    pairs = []
+    for i, (a, key_a, uf_a) in enumerate(keys):
+        for b, key_b, uf_b in keys[i + 1:]:
+            if len(key_a) < 4 or len(key_b) < 4 or (uf_a and uf_b and not uf_a & uf_b):
+                continue
+            if key_a == key_b or key_a.startswith(key_b) or key_b.startswith(key_a):
+                pairs.append((a, b))
+    return pairs

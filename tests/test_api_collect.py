@@ -27,6 +27,9 @@ def machine(name, status="idle", online=1, backup=False):
             "aggregate": {"status": status, "names": "Monitoramento;Windows"}, "policies": policies}
 
 
+# semana fixa que contém os alertas e atividades abaixo (o padrão "últimos 7 dias" depende de hoje)
+WEEK = collect.last_days(7, now=datetime(2026, 10, 9, 12, 0).astimezone())
+
 ALERTS = [
     {"type": "MachineOffline30", "severity": "critical", "category": "System", "createdAt": "2026-10-08T16:36:00Z",
      "details": {"resourceName": "MNB195", "daysPassed": 149, "errorMessage": {"kbLink": {"serCode": "MachineOffline30"}}}},
@@ -123,7 +126,7 @@ def test_local_iso():
 
 
 def test_collect_acronis_and_no_backup_warning():
-    result = collect.collect_acronis(FakeAcronis([machine("A"), machine("B", online=0)]), "acronis", "mercos")
+    result = collect.collect_acronis(FakeAcronis([machine("A"), machine("B", online=0)]), "acronis", "mercos", WEEK)
     assert result.status == "sucesso" and result.counts() == {"maquinas": 2, "alertas": 3, "atividades": 2}
     assert result.summary["maquinas_sem_backup"] == 2 and result.summary["maquinas_offline"] == 1
     assert any("Nenhuma máquina do cliente tem plano de backup" in i.message for i in result.issues)
@@ -192,7 +195,7 @@ def test_collect_zabbix_unknown_group():
 
 def test_classification_and_no_backup_card():
     result = collect.collect_acronis(FakeAcronis([machine("A", status="critical"), machine("B", online=0),
-                                                  machine("C", status="warning"), machine("D")]), "acronis", "mercos")
+                                                  machine("C", status="warning"), machine("D")]), "acronis", "mercos", WEEK)
     report = consolidate([result.to_dict()])
     by = {(r["categoria"], r["recurso"]): r for r in report["registros"]}
     assert by[(ENDPOINT, "A")]["classificacao"] == CRITICAL

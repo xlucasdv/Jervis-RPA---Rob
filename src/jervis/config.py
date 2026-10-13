@@ -95,9 +95,13 @@ class PlatformConfig:
     params: dict[str, Any] = field(default_factory=dict)
 
 
-FREQUENCIES = ("daily", "weekly", "hourly")
+FREQUENCIES = ("daily", "weekly", "hourly", "monthly")
+# coleta: coleta pelo navegador das plataformas ativas; relatorios_clientes: fechamento mensal dos relatórios por
+# cliente (API), gerados para o mês anterior e deixados pendentes de revisão
+SCHEDULE_TASKS = ("coleta", "relatorios_clientes")
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-_FREQUENCY_ALIASES = {"diaria": "daily", "diario": "daily", "semanal": "weekly", "horas": "hourly", "a_cada_horas": "hourly"}
+_FREQUENCY_ALIASES = {"diaria": "daily", "diario": "daily", "semanal": "weekly", "horas": "hourly", "a_cada_horas": "hourly",
+                      "mensal": "monthly"}
 _WEEKDAY_ALIASES = {"seg": "mon", "ter": "tue", "qua": "wed", "qui": "thu", "sex": "fri", "sab": "sat", "sáb": "sat", "dom": "sun"}
 
 
@@ -110,6 +114,8 @@ class ScheduleConfig:
     days: list[str] = field(default_factory=list)  # weekly: mon..sun (ou seg..dom)
     every_hours: int | None = None  # hourly: intervalo em horas
     start: str = "00:00"  # hourly: horário de referência do dia
+    day: int | None = None  # monthly: dia do mês (1 a 28)
+    task: str = "coleta"  # SCHEDULE_TASKS
     platforms: list[str] = field(default_factory=list)  # vazio = todas as ativas
     retries: int = 1  # reprocessamentos automáticos das falhas
     retry_delay_minutes: int = 10
@@ -399,7 +405,7 @@ def _parse_schedule(name: str, data: Any, platforms: dict[str, PlatformConfig]) 
     frequency = str(data.pop("frequency", "")).lower()
     frequency = _FREQUENCY_ALIASES.get(frequency, frequency)
     if frequency not in FREQUENCIES:
-        raise ConfigError(f"{where}.frequency deve ser daily, weekly ou hourly (diaria, semanal, horas).")
+        raise ConfigError(f"{where}.frequency deve ser daily, weekly, hourly ou monthly (diaria, semanal, horas, mensal).")
     schedule = ScheduleConfig(name=name, frequency=frequency, **data)
 
     times = schedule.times if isinstance(schedule.times, list) else [schedule.times]
@@ -408,7 +414,16 @@ def _parse_schedule(name: str, data: Any, platforms: dict[str, PlatformConfig]) 
     days = schedule.days if isinstance(schedule.days, list) else [schedule.days]
     schedule.days = [_WEEKDAY_ALIASES.get(str(d).lower(), str(d).lower()) for d in days]
 
-    if frequency in ("daily", "weekly") and not schedule.times:
+    if schedule.task not in SCHEDULE_TASKS:
+        raise ConfigError(f"{where}.task deve ser {' ou '.join(SCHEDULE_TASKS)}.")
+    if schedule.task == "relatorios_clientes" and schedule.platforms:
+        raise ConfigError(f"{where}.platforms não vale para task: relatorios_clientes (os serviços vêm do cadastro de cada cliente).")
+    if frequency == "monthly":
+        if not isinstance(schedule.day, int) or isinstance(schedule.day, bool) or not 1 <= schedule.day <= 28:
+            raise ConfigError(f"{where}.day deve ser um inteiro entre 1 e 28 (dia do mês).")
+    elif schedule.day is not None:
+        raise ConfigError(f"{where}.day só vale para frequency: monthly.")
+    if frequency in ("daily", "weekly", "monthly") and not schedule.times:
         raise ConfigError(f"{where}.times: informe ao menos um horário (ex.: [\"07:00\"]).")
     if frequency == "weekly":
         bad = [d for d in schedule.days if d not in WEEKDAYS]

@@ -32,6 +32,8 @@ class Customer:
     with_mfa: list[str] = field(default_factory=list)  # slugs com chave MFA própria do cliente
     external: dict[str, str] = field(default_factory=dict)  # slug → nome do cliente na plataforma (se cadastrado)
     contracts: dict[str, dict[str, Any]] = field(default_factory=dict)  # slug → {"produtos": [...], "dispositivos": N}
+    active: bool = True  # inativo (POC, trial, cadastro antigo): fora do fechamento mensal e do --all
+    inactive_reason: str | None = None
 
     def name_on(self, slug: str) -> str:
         """Nome usado para achar o cliente na plataforma: o do vínculo ou, sem ele, o do cadastro."""
@@ -90,14 +92,14 @@ def update_customer(conn, ref: str, name: str | None = None, desk_manager_id: st
 def list_customers(conn) -> list[Customer]:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT c.id, c.name, c.desk_manager_id, s.slug, cs.mfa_secret_encrypted IS NOT NULL, cs.external_name, "
-            "cs.products, cs.contracted_devices "
+            "SELECT c.id, c.name, c.desk_manager_id, c.active, c.inactive_reason, s.slug, cs.mfa_secret_encrypted IS NOT NULL, "
+            "cs.external_name, cs.products, cs.contracted_devices "
             "FROM customers c LEFT JOIN customer_services cs ON cs.customer_id = c.id "
             "LEFT JOIN service s ON s.id = cs.service_id ORDER BY c.name, c.id, s.slug"
         )
         customers: dict[int, Customer] = {}
-        for cid, name, dm, slug, has_mfa, external, products, contracted in cur.fetchall():
-            customer = customers.setdefault(cid, Customer(cid, name, dm))
+        for cid, name, dm, active, reason, slug, has_mfa, external, products, contracted in cur.fetchall():
+            customer = customers.setdefault(cid, Customer(cid, name, dm, active=bool(active), inactive_reason=reason))
             if slug:
                 _add_link(customer, slug, has_mfa, external, products, contracted)
         return list(customers.values())
@@ -106,23 +108,60 @@ def list_customers(conn) -> list[Customer]:
 def find_customer(conn, ref: str) -> Customer:
     """Cliente pelo id numérico, pelo id do Desk Manager ou pelo nome (sem diferenciar maiúsculas)."""
     ref = (ref or "").strip()
+    columns = "SELECT id, name, desk_manager_id, active, inactive_reason FROM customers"
     with conn.cursor() as cur:
         if ref.isdigit():
-            cur.execute("SELECT id, name, desk_manager_id FROM customers WHERE id = %s", (int(ref),))
+            cur.execute(f"{columns} WHERE id = %s", (int(ref),))
             rows = cur.fetchall()
             if rows:
-                return _with_links(conn, Customer(*rows[0]))
-        cur.execute("SELECT id, name, desk_manager_id FROM customers WHERE desk_manager_id = %s", (ref,))
+                return _with_links(conn, _customer(rows[0]))
+        cur.execute(f"{columns} WHERE desk_manager_id = %s", (ref,))
         rows = cur.fetchall()
         if not rows:
-            cur.execute("SELECT id, name, desk_manager_id FROM customers WHERE LOWER(name) = LOWER(%s) ORDER BY id", (ref,))
+            cur.execute(f"{columns} WHERE LOWER(name) = LOWER(%s) ORDER BY id", (ref,))
             rows = cur.fetchall()
     if not rows:
         raise RecordError(f"Cliente '{ref}' não encontrado. Veja os cadastrados com 'jervis customers list'.")
     if len(rows) > 1:
         options = "; ".join(f"id {r[0]} (Desk Manager: {r[2] or '—'})" for r in rows)
         raise RecordError(f"Há {len(rows)} clientes chamados '{ref}': {options}. Use o id.")
-    return _with_links(conn, Customer(*rows[0]))
+    return _with_links(conn, _customer(rows[0]))
+
+
+def _customer(row) -> Customer:
+    cid, name, dm, active, reason = row
+    return Customer(cid, name, dm, active=bool(active), inactive_reason=reason)
+
+
+def set_active(conn, ref: str, active: bool, reason: str | None = None) -> Customer:
+    """Ativa ou inativa o cliente (inativo: fora do fechamento mensal e do relatório de todos)."""
+    customer = find_customer(conn, ref)
+    with conn.cursor() as cur:
+        cur.execute("UPDATE customers SET active = %s, inactive_reason = %s WHERE id = %s",
+                    (1 if active else 0, None if active else _blank_to_none(reason), customer.id))
+    return find_customer(conn, str(customer.id))
+
+
+def merge_customers(conn, source_ref: str, target_ref: str) -> tuple[Customer, Customer, list[str]]:
+    """Junta dois cadastros do mesmo cliente: os vínculos e o histórico de relatórios de ``source`` passam para
+    ``target`` e ``source`` é apagado. Cada vínculo mantém o nome do cliente na plataforma (o nome do cadastro de
+    origem vira o nome na plataforma quando não havia um). Recusa se os dois têm o mesmo serviço. Não faz commit."""
+    source, target = find_customer(conn, source_ref), find_customer(conn, target_ref)
+    if source.id == target.id:
+        raise RecordError("Origem e destino são o mesmo cliente.")
+    both = sorted(set(source.services) & set(target.services))
+    if both:
+        raise RecordError(f"'{source.name}' e '{target.name}' estão vinculados ao mesmo serviço ({', '.join(both)}): um cliente "
+                          "tem um vínculo por serviço. Desative o cadastro que sobra ('jervis customers deactivate').")
+    with conn.cursor() as cur:
+        cur.execute("UPDATE customer_services SET customer_id = %s, external_name = COALESCE(external_name, %s) "
+                    "WHERE customer_id = %s", (target.id, source.name, source.id))
+        cur.execute("UPDATE customer_reports SET customer_id = %s WHERE customer_id = %s", (target.id, source.id))
+        if source.desk_manager_id and not target.desk_manager_id:  # único: libera na origem antes de levar
+            cur.execute("UPDATE customers SET desk_manager_id = NULL WHERE id = %s", (source.id,))
+            cur.execute("UPDATE customers SET desk_manager_id = %s WHERE id = %s", (source.desk_manager_id, target.id))
+        cur.execute("DELETE FROM customers WHERE id = %s", (source.id,))
+    return source, find_customer(conn, str(target.id)), source.services
 
 
 def remove_customer(conn, ref: str) -> Customer:
@@ -282,6 +321,98 @@ def mfa_token(conn, customer_ref: str, slug: str) -> str | None:
     if row is None:
         raise RecordError(f"O cliente '{customer.name}' não está vinculado ao serviço '{slug}'.")
     return row[0] or row[1]
+
+
+# --- relatórios gerados e revisão -------------------------------------------------------
+
+REVIEW_STATUSES = ("pendente", "aprovado", "rejeitado", "substituido", "falha")
+
+
+@dataclass
+class CustomerReport:
+    id: int
+    customer_id: int
+    customer: str
+    competencia: str | None
+    periodo: str
+    run_dir: str | None
+    resultado: str
+    status: str
+    origem: str
+    gerado_por: str | None
+    gerado_em: Any
+    revisado_por: str | None = None
+    revisado_em: Any = None
+    observacao: str | None = None
+
+
+_REPORT_COLUMNS = ("r.id, r.customer_id, c.name, r.competencia, r.periodo, r.run_dir, r.resultado, r.status, r.origem, "
+                   "r.gerado_por, r.created_at, r.revisado_por, r.revisado_em, r.observacao")
+
+
+def record_report(conn, customer_id: int, competencia: str | None, periodo: str, run_dir: str | None, resultado: str,
+                  origem: str, gerado_por: str | None, observacao: str | None = None) -> int:
+    """Registra um relatório gerado: pendente de revisão (ou "falha", se nada foi coletado). O pendente anterior do
+    mesmo cliente e competência vira "substituido": só a geração mais recente é revisada."""
+    status = "falha" if resultado == "falha" else "pendente"  # nada coletado: não há o que revisar
+    with conn.cursor() as cur:
+        if status == "pendente":
+            cur.execute("UPDATE customer_reports SET status = 'substituido' WHERE customer_id = %s AND status = 'pendente' "
+                        "AND competencia <=> %s", (customer_id, competencia))
+        cur.execute("INSERT INTO customer_reports (customer_id, competencia, periodo, run_dir, resultado, status, origem, "
+                    "gerado_por, observacao) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (customer_id, competencia, periodo[:64], run_dir, resultado, status, origem[:64], gerado_por,
+                     (observacao or None) and observacao[:1024]))
+        return cur.lastrowid
+
+
+def list_reports(conn, status: str | None = "pendente", competencia: str | None = None) -> list[CustomerReport]:
+    where, params = [], []
+    if status:
+        where.append("r.status = %s")
+        params.append(status)
+    if competencia:
+        where.append("r.competencia = %s")
+        params.append(competencia)
+    sql = (f"SELECT {_REPORT_COLUMNS} FROM customer_reports r JOIN customers c ON c.id = r.customer_id"
+           + (f" WHERE {' AND '.join(where)}" if where else "") + " ORDER BY r.competencia DESC, c.name, r.id DESC")
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
+        return [CustomerReport(*row) for row in cur.fetchall()]
+
+
+def find_report(conn, ref: str, competencia: str | None = None) -> CustomerReport:
+    """Relatório pelo id (número) ou o pendente mais recente do cliente (id, id do Desk Manager ou nome)."""
+    ref = (ref or "").strip()
+    with conn.cursor() as cur:
+        if ref.startswith("#") and ref[1:].isdigit():
+            cur.execute(f"SELECT {_REPORT_COLUMNS} FROM customer_reports r JOIN customers c ON c.id = r.customer_id "
+                        "WHERE r.id = %s", (int(ref[1:]),))
+            row = cur.fetchone()
+            if not row:
+                raise RecordError(f"Relatório {ref} não encontrado. Veja 'jervis reviews list'.")
+            return CustomerReport(*row)
+    customer = find_customer(conn, ref)
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {_REPORT_COLUMNS} FROM customer_reports r JOIN customers c ON c.id = r.customer_id "
+                    "WHERE r.customer_id = %s AND r.status = 'pendente'" + (" AND r.competencia = %s" if competencia else "")
+                    + " ORDER BY r.id DESC LIMIT 1", (customer.id, competencia) if competencia else (customer.id,))
+        row = cur.fetchone()
+    if not row:
+        raise RecordError(f"Nenhum relatório pendente de revisão para '{customer.name}'"
+                          + (f" em {competencia}" if competencia else "") + ". Veja 'jervis reviews list --status todos'.")
+    return CustomerReport(*row)
+
+
+def review_report(conn, report_id: int, status: str, reviewer: str, note: str | None = None) -> None:
+    if status not in ("aprovado", "rejeitado"):
+        raise ValueError(status)
+    with conn.cursor() as cur:
+        cur.execute("UPDATE customer_reports SET status = %s, revisado_por = %s, revisado_em = NOW(), "
+                    "observacao = COALESCE(%s, observacao) WHERE id = %s AND status = 'pendente'",
+                    (status, reviewer, (note or None) and note[:1024], report_id))
+        if cur.rowcount == 0:
+            raise RecordError(f"O relatório #{report_id} não está pendente de revisão.")
 
 
 def _blank_to_none(value: str | None) -> str | None:

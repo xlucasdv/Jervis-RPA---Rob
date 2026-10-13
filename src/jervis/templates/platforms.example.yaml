@@ -105,7 +105,7 @@ platforms:
 #     recipients: [ti@empresa.com.br]
 #     username: jervis@empresa.com.br   # omita se o relay não exige autenticação
 #     attach_report: true        # anexa o relatorio.html
-#   webhook: true                # Teams (Workflows), Slack ou JSON genérico
+#   webhook: true                # Teams (Workflows), Slack ou JSON genérico; também avisa o fechamento mensal
 #   webhook_format: teams        # teams | slack | json
 
 # Banco de dados MySQL (opcional). Com esta seção, as tabelas customers, service e customer_services são criadas
@@ -120,10 +120,18 @@ platforms:
 schedules:
   diaria:
     enabled: false
-    frequency: daily         # daily | weekly | hourly
+    frequency: daily         # daily | weekly | hourly | monthly
     times: ["07:00"]         # um ou mais horários definidos pelo administrador
     retries: 1               # reprocessa automaticamente as falhas
     retry_delay_minutes: 10  # espera antes de reprocessar
+  # Fechamento mensal: relatórios de todos os clientes vinculados, do mês anterior, pendentes de revisão
+  # (jervis reviews list), com aviso à equipe pelos canais de "notifications" (Teams e/ou e-mail).
+  fechamento_mensal:
+    enabled: false
+    task: relatorios_clientes  # coleta (padrão) | relatorios_clientes
+    frequency: monthly         # daily | weekly | hourly | monthly
+    day: 1                     # dia do mês (1 a 28)
+    times: ["06:00"]
   # semanal:
   #   frequency: weekly
   #   days: [mon, thu]       # ou seg, ter, qua, qui, sex, sab, dom

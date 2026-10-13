@@ -111,15 +111,41 @@ class Notifier:
             log.error("Falha ao notificar por %s: %s", channel, error)
         return errors
 
+    def channels(self) -> list[str]:
+        """Canais configurados (e-mail e/ou webhook)."""
+        if not self.config:
+            return []
+        return [name for name, on in (("email", self.config.email), ("webhook", self.config.webhook)) if on]
+
+    def send_message(self, subject: str, body: str, status: str = "sucesso", data: dict[str, Any] | None = None) -> dict[str, str]:
+        """Aviso avulso (ex.: fechamento mensal) por todos os canais configurados, sem o filtro de ``when``.
+        Devolve {canal: erro} das falhas; sem canais configurados, {"notificacao": motivo}."""
+        if not self.channels():
+            return {"notificacao": "nenhum canal configurado (seção notifications: webhook e/ou email)"}
+        errors = {}
+        if self.config.email:
+            try:
+                self._send_email(subject, body, None)
+            except (OSError, smtplib.SMTPException, NotificationError) as exc:
+                errors["email"] = f"{type(exc).__name__}: {exc}"
+        if self.config.webhook:
+            try:
+                self._post_webhook(self._payload(subject, body, status, data or {"assunto": subject, "texto": body}))
+            except (OSError, NotificationError) as exc:
+                errors["webhook"] = f"{type(exc).__name__}: {exc}"
+        for channel, error in errors.items():
+            log.error("Falha ao notificar por %s: %s", channel, error)
+        return errors
+
     # --- canais -----------------------------------------------------------------------
 
-    def _send_email(self, subject: str, body: str, run_dir: Path) -> None:
+    def _send_email(self, subject: str, body: str, run_dir: Path | None) -> None:
         cfg = self.config.email
         message = EmailMessage()
         message["Subject"], message["From"], message["To"] = subject, cfg.sender, ", ".join(cfg.recipients)
         message.set_content(body)
-        report = run_dir / "relatorio.html"
-        if cfg.attach_report and report.exists() and report.stat().st_size <= MAX_ATTACHMENT:
+        report = run_dir / "relatorio.html" if run_dir else None
+        if cfg.attach_report and report and report.exists() and report.stat().st_size <= MAX_ATTACHMENT:
             message.add_attachment(report.read_bytes(), maintype="text", subtype="html", filename=report.name)
         factory = self._smtp_factory or (smtplib.SMTP_SSL if cfg.ssl else smtplib.SMTP)
         with factory(cfg.smtp_host, cfg.smtp_port, timeout=30) as smtp:
@@ -133,10 +159,12 @@ class Notifier:
             smtp.send_message(message)
 
     def _send_webhook(self, subject: str, body: str, manifest: dict[str, Any]) -> None:
+        self._post_webhook(self._webhook_payload(subject, body, manifest))
+
+    def _post_webhook(self, payload: dict[str, Any]) -> None:
         url = self.store.get_secret(WEBHOOK_SECRET)
         if not url:
             raise NotificationError("URL do webhook não cadastrada: use 'jervis notify set-webhook'.")
-        payload = self._webhook_payload(subject, body, manifest)
         request = urllib.request.Request(
             url, data=json.dumps(payload).encode("utf-8"), method="POST",
             headers={"Content-Type": "application/json"},
@@ -146,13 +174,15 @@ class Notifier:
                 raise NotificationError(f"Webhook respondeu HTTP {response.status}.")
 
     def _webhook_payload(self, subject: str, body: str, manifest: dict[str, Any]) -> dict[str, Any]:
+        return self._payload(subject, body, notification_status(manifest), {"execucao": manifest})
+
+    def _payload(self, subject: str, body: str, status: str, data: dict[str, Any]) -> dict[str, Any]:
         fmt = self.config.webhook_format
         if fmt == "slack":
             return {"text": f"*{subject}*\n```{body}```"}
         if fmt == "json":
-            return {"assunto": subject, "status": notification_status(manifest), "execucao": manifest}
+            return {"assunto": subject, "status": status, **data}
         # Teams (fluxo "Workflows" com Adaptive Card; os conectores antigos do Office 365 foram descontinuados).
-        status = notification_status(manifest)
         return {
             "type": "message",
             "attachments": [{

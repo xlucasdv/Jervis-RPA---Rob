@@ -1,5 +1,6 @@
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -35,6 +36,19 @@ def test_next_run(schedule, after, expected):
     assert scheduling.next_run(schedule, after) == expected
 
 
+def test_monthly_closing_schedule():
+    closing = sched(name="fechamento_mensal", frequency="monthly", day=1, times=["06:00"], task="relatorios_clientes")
+    assert scheduling.next_run(closing, datetime(2026, 10, 13, 10, 0)) == datetime(2026, 11, 1, 6, 0)
+    assert scheduling.next_run(closing, datetime(2026, 10, 1, 5, 59)) == datetime(2026, 10, 1, 6, 0)
+    assert scheduling.next_run(closing, datetime(2026, 12, 1, 6, 0)) == datetime(2027, 1, 1, 6, 0)  # virada do ano
+    assert scheduling.describe(closing) == "mensalmente no dia 1 às 06:00"
+    command = scheduling.create_commands(closing, Path("fechamento_mensal.cmd"))[0]
+    assert "/SC MONTHLY /D 1 /ST 06:00" in command and "Jervis3000\\fechamento_mensal" in command
+    config = parse_config({"platforms": {}, "schedules": {"fechamento_mensal": {
+        "frequency": "mensal", "day": 1, "times": ["06:00"], "task": "relatorios_clientes"}}})
+    assert config.schedules["fechamento_mensal"] == closing
+
+
 def test_describe():
     assert scheduling.describe(sched(times=["07:00", "18:00"])) == "diariamente às 07:00, 18:00"
     assert scheduling.describe(sched(frequency="weekly", days=["mon", "sat"])) == "semanalmente (seg, sáb) às 07:00"
@@ -60,7 +74,13 @@ def test_schedule_config_parsing_accepts_aliases_and_unquoted_times():
 @pytest.mark.parametrize(
     "schedule, message",
     [
-        ({"frequency": "mensal", "times": ["07:00"]}, "frequency"),
+        ({"frequency": "anual", "times": ["07:00"]}, "frequency"),
+        ({"frequency": "mensal", "times": ["06:00"]}, "day deve ser"),
+        ({"frequency": "monthly", "times": ["06:00"], "day": 31}, "day deve ser"),
+        ({"frequency": "daily", "times": ["06:00"], "day": 1}, "day só vale"),
+        ({"frequency": "monthly", "times": ["06:00"], "day": 1, "task": "backup"}, "task deve ser"),
+        ({"frequency": "monthly", "times": ["06:00"], "day": 1, "task": "relatorios_clientes", "platforms": ["zabbix"]},
+         "platforms não vale"),
         ({"frequency": "daily"}, "ao menos um horário"),
         ({"frequency": "daily", "times": ["25:00"]}, "horário inválido"),
         ({"frequency": "weekly", "times": ["07:00"]}, "days"),

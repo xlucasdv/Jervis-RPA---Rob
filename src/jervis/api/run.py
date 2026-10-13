@@ -47,10 +47,10 @@ def slug(text: str) -> str:
 
 
 def reportable_customers(conn) -> list[repository.Customer]:
-    """Clientes vinculados a pelo menos um serviço coletável por API (Acronis, Sophos ou Zabbix), por nome."""
+    """Clientes ativos vinculados a pelo menos um serviço coletável por API (Acronis, Sophos ou Zabbix), por nome."""
     services = {s.slug: s for s in repository.list_services(conn)}
-    return [c for c in repository.list_customers(conn)
-            if any(slug in services and services[slug].class_identifier in COLLECTABLE for slug in c.services)]
+    return [c for c in repository.list_customers(conn) if c.active
+            and any(slug in services and services[slug].class_identifier in COLLECTABLE for slug in c.services)]
 
 
 def run_customer(config: AppConfig, store: CredentialStore, conn, customer_ref: str,

@@ -43,7 +43,7 @@ def connect(db: DatabaseConfig, store: CredentialStore, database: bool = True,
         return connector(
             host=db.host, port=db.port, user=creds.username, password=creds.password.reveal(),
             database=db.name if database else None, charset="utf8mb4", connect_timeout=db.connect_timeout,
-            autocommit=False,
+            autocommit=False, init_command="SET time_zone = '+00:00'",  # datas do banco sempre em UTC
         )
     except pymysql.err.OperationalError as exc:
         raise DatabaseError(_friendly(exc, db)) from exc

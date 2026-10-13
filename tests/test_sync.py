@@ -1,11 +1,12 @@
 """Clientes das plataformas x cadastro do Jervis (jervis services clients) e relatório de todos (--all)."""
 
 import contextlib
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 from jervis import cli
-from jervis.api import ApiError, run, sync
+from jervis.api import ApiError, collect, run, sync
 from jervis.config import AppConfig, Settings
 from jervis.db import repository
 from jervis.db.repository import Customer, Service
@@ -50,7 +51,10 @@ def test_reportable_customers_only_with_api_services(monkeypatch):
 
 
 def test_report_all_continues_after_a_failure(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "_db", lambda config: contextlib.nullcontext(None))
+    recorded = []
+    monkeypatch.setattr(repository, "record_report", lambda conn, cid, comp, period, run_dir, result, origin, user, note=None:
+                        recorded.append((cid, result, run_dir)) or len(recorded))
+    monkeypatch.setattr(cli, "_db", lambda config: contextlib.nullcontext(SimpleNamespace(commit=lambda: None)))
     monkeypatch.setattr(cli, "_store", lambda config: None)
     monkeypatch.setattr(cli, "_audit", lambda *a, **k: None)
     people = [Customer(1, "A", None), Customer(2, "B", None), Customer(3, "C", None)]
@@ -61,9 +65,18 @@ def test_report_all_continues_after_a_failure(monkeypatch, capsys):
         status = "sucesso" if ref == "1" else "parcial"
         return SimpleNamespace(results=[SimpleNamespace(platform="acronis", status=status)], run_dir=Path(f"out/{ref}"))
 
+    def fake_run_with_customer(config, store, conn, ref, **kwargs):
+        run = fake_run(config, store, conn, ref, **kwargs)
+        run.customer = people[int(ref) - 1]
+        return run
+
     config = AppConfig(settings=Settings(), platforms={})
-    assert cli._report_all(config, lambda conn: people, fake_run, None, None, False) == 2
+    period = collect.month("2026-09", now=datetime(2026, 10, 13).astimezone())
+    assert cli._report_all(config, lambda conn: people, fake_run_with_customer, period, None, False) == 2
     out = capsys.readouterr().out
-    assert "3 cliente(s): A, B, C" in out and "[2/3] B: FALHA" in out
-    summary = [line.split()[:2] for line in out.split("Resumo:")[1].strip().splitlines()[1:]]
-    assert summary == [["A", "sucesso"], ["B", "falha"], ["C", "parcial"]]
+    assert "3 cliente(s): A, B, C" in out and "[2/3] B" in out and "FALHA: [acronis] Cliente 'B'" in out
+    summary = [line.split()[:3] for line in out.split("Resumo:")[1].strip().splitlines()[1:4]]
+    assert summary == [["#1", "A", "sucesso"], ["#2", "B", "falha"], ["#3", "C", "parcial"]]
+    assert [(cid, result) for cid, result, _ in recorded] == [(1, "sucesso"), (2, "falha"), (3, "parcial")]
+    assert recorded[1][2] is None  # falha: sem pasta
+    assert "2 relatório(s) aguardando revisão" in out

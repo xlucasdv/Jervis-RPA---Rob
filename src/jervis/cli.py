@@ -13,7 +13,7 @@ import sys
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from selenium.common.exceptions import WebDriverException
@@ -24,7 +24,7 @@ from jervis.auth.profiles import SUPPORTED_KINDS
 from jervis import db, driver, scheduling
 from jervis.db import crypto, repository
 from jervis.api import ApiError, credentials as api_credentials
-from jervis.audit import AuditLog
+from jervis.audit import AuditLog, actor
 from jervis.health import HEALTH_EXIT, compute_health
 from jervis.notify import SMTP_SECRET, WEBHOOK_SECRET, Notifier
 from jervis.check import check_platform, save_check
@@ -190,7 +190,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p = notify.add_parser("set-webhook", help="cadastra a URL do webhook (Teams/Slack) no cofre do sistema")
     p.set_defaults(handler=cmd_notify_set_webhook)
     p = notify.add_parser("test", help="envia uma notificação de teste pelos canais configurados")
-    p.add_argument("--status", choices=("sucesso", "parcial", "falha"), default="falha")
+    p.add_argument("--status", choices=("sucesso", "parcial", "falha"),
+                   help="em vez da mensagem de teste, mostra como chega o aviso de uma coleta com esta situação")
     p.set_defaults(handler=cmd_notify_test)
 
     # --- config ---
@@ -233,6 +234,20 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("customer", help="id, id do Desk Manager ou nome")
     p.add_argument("--yes", action="store_true", help="não pede confirmação")
     p.set_defaults(handler=cmd_customers_remove)
+    p = cust.add_parser("deactivate", help="inativa o cliente (POC, trial, cadastro antigo): fica fora do fechamento mensal e do --all")
+    p.add_argument("customer", help="id, id do Desk Manager ou nome")
+    p.add_argument("--reason", help="motivo (ex.: POC encerrada)")
+    p.set_defaults(handler=cmd_customers_deactivate)
+    p = cust.add_parser("activate", help="reativa o cliente")
+    p.add_argument("customer", help="id, id do Desk Manager ou nome")
+    p.set_defaults(handler=cmd_customers_activate)
+    p = cust.add_parser("merge", help="junta dois cadastros do mesmo cliente: vínculos e histórico da origem vão para o destino")
+    p.add_argument("source", metavar="origem", help="cadastro que deixa de existir (id, id do Desk Manager ou nome)")
+    p.add_argument("target", metavar="destino", help="cadastro que fica")
+    p.add_argument("--yes", action="store_true", help="não pede confirmação")
+    p.set_defaults(handler=cmd_customers_merge)
+    p = cust.add_parser("duplicates", help="sugere cadastros duplicados e de teste (POC, trial) para revisar; não altera nada")
+    p.set_defaults(handler=cmd_customers_duplicates)
     p = cust.add_parser("link", help="vincula o cliente a um serviço (ou atualiza o vínculo)")
     p.add_argument("customer", help="id, id do Desk Manager ou nome")
     p.add_argument("service", help="slug do serviço (ex.: acronis)")
@@ -261,6 +276,30 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("customer", help="id, id do Desk Manager ou nome")
     p.add_argument("service", help="slug do serviço")
     p.set_defaults(handler=cmd_customers_unlink)
+
+    rev = sub.add_parser("reviews", help="revisão dos relatórios por cliente antes do envio").add_subparsers(
+        title="ações", metavar="<ação>", required=True)
+    p = rev.add_parser("list", help="relatórios gerados e a situação da revisão")
+    p.add_argument("--status", default="pendente", choices=(*repository.REVIEW_STATUSES, "todos"),
+                   help="padrão: pendente")
+    p.add_argument("--month", help="competência AAAA-MM")
+    p.set_defaults(handler=cmd_reviews_list)
+    for action, helptext, handler in (("approve", "aprova o relatório (registra quem e quando) e mostra os arquivos para enviar", cmd_reviews_approve),
+                                      ("reject", "rejeita o relatório, com o motivo", cmd_reviews_reject),
+                                      ("open", "abre o relatório executivo (ou a pasta) para revisar", cmd_reviews_open)):
+        p = rev.add_parser(action, help=helptext)
+        p.add_argument("report", metavar="cliente|#id", help="cliente (o pendente mais recente) ou #id da revisão")
+        p.add_argument("--month", help="competência AAAA-MM (quando o cliente tem mais de um pendente)")
+        if action == "approve":
+            p.add_argument("--note", help="observação da aprovação")
+        if action == "reject":
+            p.add_argument("--reason", required=True, help="motivo da rejeição")
+        p.set_defaults(handler=handler)
+    p = sub.add_parser("month-close", help="fechamento mensal: relatórios de todos os clientes do mês anterior, "
+                                           "pendentes de revisão, e aviso à equipe")
+    p.add_argument("--month", help="competência AAAA-MM (padrão: o mês anterior)")
+    p.add_argument("--no-notify", action="store_true", help="não avisa a equipe (Teams/e-mail)")
+    p.set_defaults(handler=cmd_month_close)
 
     svc = sub.add_parser("services", help="serviços (plataformas) no banco e suas configurações").add_subparsers(
         title="ações", metavar="<ação>", required=True)
@@ -819,10 +858,11 @@ def cmd_schedule_list(args: argparse.Namespace, config: AppConfig) -> int:
         tasks = scheduling.task_names(s, config.environment)
         in_windows = "?" if installed is None else ("sim" if all(t in installed for t in tasks) else "não")
         rows.append([
-            s.name, "sim" if s.enabled else "não", scheduling.describe(s), ", ".join(s.platforms) or "todas as ativas",
+            s.name, "sim" if s.enabled else "não", scheduling.describe(s),
+            "fechamento mensal (relatórios por cliente)" if s.task == "relatorios_clientes" else ", ".join(s.platforms) or "todas as ativas",
             f"{scheduling.next_run(s, now):%d/%m %H:%M}" if s.enabled else "—", in_windows,
         ])
-    _print_table(["NOME", "ATIVO", "QUANDO", "PLATAFORMAS", "PRÓXIMA", "NO WINDOWS"], rows)
+    _print_table(["NOME", "ATIVO", "QUANDO", "O QUÊ", "PRÓXIMA", "NO WINDOWS"], rows)
     if installed is not None and any(r[1] == "sim" and r[5] == "não" for r in rows):
         print("\nHá agendamentos ativos não registrados no Agendador de Tarefas: execute 'jervis schedule install'.")
     return EXIT_OK
@@ -856,6 +896,8 @@ def _run_schedule(config: AppConfig, schedule: ScheduleConfig) -> int:
     if not schedule.enabled:
         print(f"Agendamento '{schedule.name}' está desativado; nada a fazer.")
         return EXIT_OK
+    if schedule.task == "relatorios_clientes":  # fechamento mensal dos relatórios por cliente
+        return _month_close(config, None, f"agendamento:{schedule.name}")
     platforms = _platforms_from(schedule.platforms, config)
     if not platforms:
         print("Nenhuma plataforma ativa para coletar.")
@@ -955,11 +997,19 @@ def cmd_notify_set_webhook(args: argparse.Namespace, config: AppConfig) -> int:
 def cmd_notify_test(args: argparse.Namespace, config: AppConfig) -> int:
     if not config.notifications:
         raise ConfigError("Nenhuma notificação configurada. Inclua a seção 'notifications' no arquivo de configuração.")
-    manifest = {
-        "id": "teste", "origem": "teste de notificação", "ambiente": config.environment, "estado": "concluida",
-        "status": args.status, "plataformas": {"exemplo": {"status": args.status, "contagens": {"registros": 0}}},
-    }
-    errors = Notifier(config.notifications, _store(config)).notify(manifest, Path(config.settings.output_dir), force=True)
+    notifier = Notifier(config.notifications, _store(config))
+    if args.status:  # prévia do aviso de uma coleta
+        manifest = {
+            "id": "teste", "origem": "teste de notificação", "ambiente": config.environment, "estado": "concluida",
+            "status": args.status, "plataformas": {"exemplo": {"status": args.status, "contagens": {"registros": 0}}},
+        }
+        errors = notifier.notify(manifest, Path(config.settings.output_dir), force=True)
+    else:
+        who = actor()
+        errors = notifier.send_message(
+            "[Jervis3000] Teste de notificação",
+            f"Mensagem de teste enviada por {who['usuario']} em {who['maquina']} ({datetime.now():%d/%m/%Y %H:%M}).\n"
+            "Os avisos das coletas e do fechamento mensal dos relatórios chegarão por aqui.")
     channels = [c for c, on in (("email", config.notifications.email), ("webhook", config.notifications.webhook)) if on]
     for channel in channels:
         print(f"  {channel}: " + (f"FALHOU — {errors[channel]}" if channel in errors else "enviado"))
@@ -1121,16 +1171,18 @@ def cmd_customers_list(args: argparse.Namespace, config: AppConfig) -> int:
     if not customers:
         print("Nenhum cliente cadastrado. Use 'jervis customers add \"NOME\"'.")
         return EXIT_OK
-    _print_table(["ID", "CLIENTE", "DESK MANAGER", "SERVIÇOS"],
-                 [[str(c.id), c.name, c.desk_manager_id or "—", _services_label(c)] for c in customers])
-    print(f"\n{len(customers)} cliente(s).")
+    _print_table(["ID", "CLIENTE", "ATIVO", "DESK MANAGER", "SERVIÇOS"],
+                 [[str(c.id), c.name, "sim" if c.active else "não", c.desk_manager_id or "—", _services_label(c)] for c in customers])
+    inactive = sum(1 for c in customers if not c.active)
+    print(f"\n{len(customers)} cliente(s)" + (f", {inactive} inativo(s) (fora do fechamento mensal)." if inactive else "."))
     return EXIT_OK
 
 
 def cmd_customers_show(args: argparse.Namespace, config: AppConfig) -> int:
     with _db(config) as conn:
         c = repository.find_customer(conn, args.customer)
-    print(f"Cliente: {c.name} (id {c.id})\nDesk Manager: {c.desk_manager_id or '—'}")
+    print(f"Cliente: {c.name} (id {c.id})\nDesk Manager: {c.desk_manager_id or '—'}\n"
+          f"Situação: {'ativo' if c.active else 'inativo' + (f' ({c.inactive_reason})' if c.inactive_reason else '') + ' — fora do fechamento mensal'}")
     if not c.services:
         print("Serviços: nenhum (use 'jervis customers link')")
         return EXIT_OK
@@ -1167,6 +1219,67 @@ def cmd_customers_remove(args: argparse.Namespace, config: AppConfig) -> int:
     return EXIT_OK
 
 
+def cmd_customers_deactivate(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        c = repository.set_active(conn, args.customer, False, args.reason)
+    _audit(config, "cliente_inativado", cliente=c.name, id=c.id, motivo=c.inactive_reason)
+    print(f"{c.name} (id {c.id}) inativado" + (f" ({c.inactive_reason})" if c.inactive_reason else "")
+          + ": fica fora do fechamento mensal e do 'customers report --all'.")
+    return EXIT_OK
+
+
+def cmd_customers_activate(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        c = repository.set_active(conn, args.customer, True)
+    _audit(config, "cliente_reativado", cliente=c.name, id=c.id)
+    print(f"{c.name} (id {c.id}) reativado.")
+    return EXIT_OK
+
+
+def cmd_customers_merge(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        source, target = repository.find_customer(conn, args.source), repository.find_customer(conn, args.target)
+        if not args.yes:
+            print(f"Origem:  {source.name} (id {source.id}) — {_services_label(source)}")
+            print(f"Destino: {target.name} (id {target.id}) — {_services_label(target)}")
+            answer = input(f"Mover os vínculos e o histórico de '{source.name}' para '{target.name}' e apagar a origem? [s/N] ")
+            if answer.strip().lower() not in ("s", "sim"):
+                print("Nada foi alterado.")
+                return EXIT_OK
+        source, target, moved = repository.merge_customers(conn, str(source.id), str(target.id))
+    _audit(config, "clientes_unidos", origem=source.name, origem_id=source.id, destino=target.name, destino_id=target.id,
+           servicos=moved)
+    print(f"'{source.name}' unido a '{target.name}' (id {target.id}). Serviços agora: {_services_label(target)}")
+    return EXIT_OK
+
+
+def cmd_customers_duplicates(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.api import sync
+
+    with _db(config) as conn:
+        customers = repository.list_customers(conn)
+    active = [c for c in customers if c.active]
+    pairs = sync.probable_duplicates(active)
+    if pairs:
+        print("Prováveis cadastros do mesmo cliente:")
+        for a, b in pairs:
+            same = sorted(set(a.services) & set(b.services))
+            hint = (f"mesmo serviço ({', '.join(same)}): desative o que sobra" if same
+                    else f"jervis customers merge {a.id} {b.id}  (ou {b.id} {a.id})")
+            print(f"  {a.name} (id {a.id}: {', '.join(a.services) or '—'})  ×  {b.name} (id {b.id}: {', '.join(b.services) or '—'})")
+            print(f"      → {hint}")
+    tests = [c for c in active if sync.looks_like_test(c.name)]
+    if tests:
+        print("\nCom cara de POC, trial ou teste:")
+        for c in tests:
+            print(f"  {c.name} (id {c.id}) → jervis customers deactivate {c.id} --reason \"...\"")
+    if not pairs and not tests:
+        print("Nenhum provável duplicado ou cliente de teste entre os ativos.")
+    else:
+        print("\nSão sugestões pelo nome: confira antes de unir ou inativar.")
+    return EXIT_OK
+
+
 def cmd_customers_link(args: argparse.Namespace, config: AppConfig) -> int:
     token = _prompt_mfa(_store(config)) if args.mfa else None if args.clear_mfa else repository.KEEP
     external = repository.KEEP if args.external_name is None else args.external_name
@@ -1185,21 +1298,25 @@ def cmd_customers_link(args: argparse.Namespace, config: AppConfig) -> int:
     return EXIT_OK
 
 
+def _report_formats(text: str | None) -> list[str] | None:
+    if not text:
+        return None
+    formats = [f.strip().lower() for f in text.split(",") if f.strip()]
+    invalid = [f for f in formats if f not in REPORT_FORMATS]
+    if invalid:
+        raise ConfigError(f"Formato(s) inválido(s): {', '.join(invalid)}. Opções: {', '.join(REPORT_FORMATS)}.")
+    return formats
+
+
 def cmd_customers_report(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.api import closing, collect
     from jervis.api.run import reportable_customers, run_customer
 
     if bool(args.customer) == bool(args.all_customers):
         raise ConfigError("Informe um cliente ou --all.")
     if args.all_customers and (args.notes or args.open):
         raise ConfigError("--notes e --open valem para um cliente só (com --all, as notas vêm de notas/<cliente>/).")
-    formats = None
-    if args.formats:
-        formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
-        invalid = [f for f in formats if f not in REPORT_FORMATS]
-        if invalid:
-            raise ConfigError(f"Formato(s) inválido(s): {', '.join(invalid)}. Opções: {', '.join(REPORT_FORMATS)}.")
-    from jervis.api import collect
-
+    formats = _report_formats(args.formats)
     if args.days is not None:
         if args.days <= 0:
             raise ConfigError("--days deve ser um número positivo de dias.")
@@ -1217,39 +1334,147 @@ def cmd_customers_report(args: argparse.Namespace, config: AppConfig) -> int:
     with _db(config) as conn:
         run = run_customer(config, _store(config), conn, args.customer, period=period, formats=formats, notes=notes,
                            ai=args.ia)
+        outcome, report_id = closing.record(conn, run, period, "manual", actor()["usuario"])
     statuses = {r.platform: r.status for r in run.results}
-    _audit(config, "relatorio_cliente", cliente=run.customer.name, execucao=str(run.run_dir), plataformas=statuses)
+    _audit(config, "relatorio_cliente", cliente=run.customer.name, execucao=str(run.run_dir), plataformas=statuses,
+           revisao=report_id)
     print(f"\nRelatório em {run.run_dir}")
+    if outcome != "falha":
+        print(f"Registrado para revisão (#{report_id}). Aprovar: jervis reviews approve \"{run.customer.name}\"")
     if args.open and run.files.get("html"):
         _open_file(run.files["html"][0])
-    return EXIT_OK if all(s == "sucesso" for s in statuses.values()) else 2
+    return EXIT_OK if outcome == "sucesso" else 2
 
 
-def _report_all(config: AppConfig, reportable_customers, run_customer, period, formats, ai: bool) -> int:
-    """Relatório de cada cliente vinculado, um após o outro; a falha de um não interrompe os demais."""
-    store, summary = _store(config), []
+def _report_all(config: AppConfig, reportable_customers, run_customer, period, formats, ai: bool,
+                origin: str = "manual") -> int:
+    """Relatório de cada cliente vinculado, um após o outro (a falha de um não interrompe os demais), cada um
+    registrado para revisão."""
+    from jervis.api import closing
+
     with _db(config) as conn:
         customers = reportable_customers(conn)
         if not customers:
             print("Nenhum cliente vinculado a Acronis, Sophos ou Zabbix. Veja 'jervis services clients acronis --import'.")
             return EXIT_OK
         print(f"{len(customers)} cliente(s): {', '.join(c.name for c in customers)}\n")
-        for index, customer in enumerate(customers, 1):
-            print(f"[{index}/{len(customers)}] ", end="")
-            try:
-                run = run_customer(config, store, conn, str(customer.id), period=period, formats=formats, ai=ai)
-            except JervisError as exc:
-                print(f"{customer.name}: FALHA — {redact(str(exc))}\n")
-                summary.append([customer.name, "falha", redact(str(exc))])
-                continue
-            statuses = {r.platform: r.status for r in run.results}
-            _audit(config, "relatorio_cliente", cliente=customer.name, execucao=str(run.run_dir), plataformas=statuses)
-            ok = all(s == "sucesso" for s in statuses.values())
-            summary.append([customer.name, "sucesso" if ok else "parcial", str(run.run_dir)])
-            print()
-    print("Resumo:")
-    _print_table(["CLIENTE", "SITUAÇÃO", "PASTA / MOTIVO"], summary)
-    return EXIT_OK if all(row[1] == "sucesso" for row in summary) else 2
+        outcomes = closing.run_customers(config, _store(config), conn, customers, period, run_customer, formats, ai,
+                                         origin, actor()["usuario"])
+    _print_outcomes(config, outcomes)
+    return EXIT_OK if all(o.resultado == "sucesso" for o in outcomes) else 2
+
+
+def _print_outcomes(config: AppConfig, outcomes) -> None:
+    for o in outcomes:
+        _audit(config, "relatorio_cliente", cliente=o.customer, execucao=str(o.run_dir) if o.run_dir else None,
+               resultado=o.resultado, revisao=o.report_id)
+    print("\nResumo:")
+    _print_table(["REVISÃO", "CLIENTE", "SITUAÇÃO", "PASTA / MOTIVO"],
+                 [[f"#{o.report_id}" if o.report_id else "—", o.customer, o.resultado,
+                   str(o.run_dir) if o.run_dir and o.resultado != "falha" else o.detalhe] for o in outcomes])
+    pending = sum(1 for o in outcomes if o.resultado != "falha")
+    if pending:
+        print(f"\n{pending} relatório(s) aguardando revisão: jervis reviews list")
+
+
+def cmd_month_close(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.api import closing, collect
+
+    month = args.month or closing.previous_month()
+    try:
+        collect.month(month)
+    except ValueError as exc:
+        raise ConfigError(f"--month: {exc}") from exc
+    return _month_close(config, month, "manual", notify=not args.no_notify)
+
+
+def _month_close(config: AppConfig, month: str | None, origin: str, notify: bool = True) -> int:
+    from jervis.api import closing
+    from jervis.api.run import reportable_customers, run_customer
+
+    store = _store(config)
+    notifier = Notifier(config.notifications, store) if notify else None
+    if notify and not notifier.channels():
+        print("Atenção: nenhum canal de notificação configurado (seção notifications); a equipe não será avisada.")
+        notifier = None
+    with _db(config) as conn:
+        outcomes = closing.close_month(config, store, conn, notifier, run_customer, reportable_customers, month,
+                                       origin=origin, user=actor()["usuario"])
+    _audit(config, "fechamento_mensal", competencia=month or closing.previous_month(), origem=origin,
+           clientes=len(outcomes), falhas=sum(1 for o in outcomes if o.resultado == "falha"))
+    _print_outcomes(config, outcomes)
+    return EXIT_OK if all(o.resultado == "sucesso" for o in outcomes) else 2
+
+
+def _local(moment) -> str:
+    """Data do banco (UTC, sem fuso) no horário desta máquina."""
+    if not moment:
+        return "—"
+    return f"{moment.replace(tzinfo=timezone.utc).astimezone():%d/%m %H:%M}"
+
+
+_REVIEW_LABEL = {"pendente": "pendente", "aprovado": "aprovado", "rejeitado": "rejeitado", "substituido": "substituído",
+                 "falha": "falha"}
+
+
+def cmd_reviews_list(args: argparse.Namespace, config: AppConfig) -> int:
+    status = None if args.status == "todos" else args.status
+    with _db(config) as conn:
+        reports = repository.list_reports(conn, status, args.month)
+    if not reports:
+        print("Nenhum relatório" + (f" {_REVIEW_LABEL[status]}" if status else "") + (f" em {args.month}" if args.month else "") + ".")
+        return EXIT_OK
+    _print_table(["REVISÃO", "CLIENTE", "COMPETÊNCIA", "RESULTADO", "SITUAÇÃO", "GERADO EM", "REVISADO POR", "PASTA / OBSERVAÇÃO"],
+                 [[f"#{r.id}", r.customer, r.competencia or r.periodo, r.resultado, _REVIEW_LABEL.get(r.status, r.status),
+                   _local(r.gerado_em), r.revisado_por or "—",
+                   r.run_dir if r.status in ("pendente", "aprovado") and r.run_dir else (r.observacao or "—")] for r in reports])
+    print(f"\n{len(reports)} relatório(s).")
+    if status == "pendente":
+        print("Abrir: jervis reviews open <cliente> | Aprovar: jervis reviews approve <cliente> | "
+              "Rejeitar: jervis reviews reject <cliente> --reason \"...\"")
+    return EXIT_OK
+
+
+def _review(args: argparse.Namespace, config: AppConfig, status: str, note: str | None) -> int:
+    reviewer = actor()["usuario"]
+    with _db(config) as conn:
+        report = repository.find_report(conn, args.report, args.month)
+        repository.review_report(conn, report.id, status, reviewer, note)
+    _audit(config, f"relatorio_{status}", revisao=report.id, cliente=report.customer, competencia=report.competencia,
+           pasta=report.run_dir, observacao=note)
+    label = "aprovado" if status == "aprovado" else "rejeitado"
+    print(f"Relatório #{report.id} de {report.customer} ({report.competencia or report.periodo}) {label} por {reviewer}.")
+    if status == "aprovado" and report.run_dir:
+        folder = Path(report.run_dir)
+        files = [folder / name for name in ("relatorio_executivo.pdf", "relatorio_mensal.pdf") if (folder / name).exists()]
+        print("Arquivos para enviar ao cliente:")
+        for f in files or [folder]:
+            print(f"  {f}")
+    elif status == "rejeitado":
+        print(f"Para gerar de novo: jervis customers report \"{report.customer}\"" + (f" --month {report.competencia}" if report.competencia else ""))
+    return EXIT_OK
+
+
+def cmd_reviews_approve(args: argparse.Namespace, config: AppConfig) -> int:
+    return _review(args, config, "aprovado", args.note)
+
+
+def cmd_reviews_reject(args: argparse.Namespace, config: AppConfig) -> int:
+    if not args.reason.strip():
+        raise ConfigError("Informe o motivo da rejeição em --reason.")
+    return _review(args, config, "rejeitado", args.reason.strip())
+
+
+def cmd_reviews_open(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        report = repository.find_report(conn, args.report, args.month)
+    if not report.run_dir or not Path(report.run_dir).is_dir():
+        raise ConfigError(f"A pasta do relatório #{report.id} não existe mais: {report.run_dir or '—'}.")
+    folder = Path(report.run_dir)
+    target = folder / "relatorio_executivo.pdf"
+    _open_file(target if target.exists() else folder)
+    print(f"Aberto: {target if target.exists() else folder}")
+    return EXIT_OK
 
 
 def cmd_customers_unlink(args: argparse.Namespace, config: AppConfig) -> int:

@@ -1,10 +1,12 @@
 """Tabelas do banco (MySQL 8, InnoDB, utf8mb4), criadas na inicialização se não existirem.
 
-- customers: clientes atendidos (nome e id no Desk Manager).
+- customers: clientes atendidos (nome, id no Desk Manager e se está ativo: inativos ficam fora do fechamento).
 - service: plataformas consultadas e suas configurações (url, slug, identificador da classe do coletor) e a
   chave MFA da conta de parceiro, criptografada (usuário e senha ficam no cofre, pelo slug).
 - customer_services: liga um cliente a um serviço, com o nome do cliente dentro da plataforma; a chave MFA
   aqui é opcional (cliente com conta própria) e, quando existe, tem prioridade sobre a do serviço.
+- customer_reports: cada relatório gerado por cliente e a revisão da equipe antes do envio (pendente,
+  aprovado, rejeitado), com quem revisou e quando.
 
 A ordem da lista é a de criação: tabelas referenciadas por chave estrangeira vêm antes.
 """
@@ -21,7 +23,9 @@ TABLES: list[tuple[str, str]] = [
 CREATE TABLE IF NOT EXISTS customers (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   name VARCHAR(255) NOT NULL COMMENT 'nome do cliente',
-  desk_manager_id VARCHAR(64) NULL COMMENT 'id do cliente no Desk Manager',{_TIMESTAMPS},
+  desk_manager_id VARCHAR(64) NULL COMMENT 'id do cliente no Desk Manager',
+  active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 = inativo (POC, trial, cadastro antigo): fora do fechamento mensal',
+  inactive_reason VARCHAR(255) NULL COMMENT 'motivo da inativação',{_TIMESTAMPS},
   PRIMARY KEY (id),
   UNIQUE KEY uq_customers_desk_manager_id (desk_manager_id)
 ) {_TABLE_OPTIONS} COMMENT='clientes atendidos'"""),
@@ -54,6 +58,26 @@ CREATE TABLE IF NOT EXISTS customer_services (
   CONSTRAINT fk_customer_services_customer FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,
   CONSTRAINT fk_customer_services_service FOREIGN KEY (service_id) REFERENCES service (id) ON DELETE RESTRICT
 ) {_TABLE_OPTIONS} COMMENT='serviços contratados por cliente'"""),
+
+    ("customer_reports", f"""
+CREATE TABLE IF NOT EXISTS customer_reports (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  customer_id INT UNSIGNED NOT NULL,
+  competencia CHAR(7) NULL COMMENT 'mês do relatório (AAAA-MM); vazio = relatório de N dias',
+  periodo VARCHAR(64) NOT NULL COMMENT 'período como aparece no relatório',
+  run_dir VARCHAR(512) NULL COMMENT 'pasta com os arquivos gerados',
+  resultado VARCHAR(16) NOT NULL COMMENT 'sucesso | parcial | falha (da coleta)',
+  status VARCHAR(16) NOT NULL COMMENT 'pendente | aprovado | rejeitado | substituido | falha',
+  origem VARCHAR(64) NOT NULL COMMENT 'manual ou agendamento:<nome>',
+  gerado_por VARCHAR(128) NULL COMMENT 'usuário do Windows que gerou',
+  revisado_por VARCHAR(128) NULL COMMENT 'usuário do Windows que aprovou/rejeitou',
+  revisado_em DATETIME NULL,
+  observacao VARCHAR(1024) NULL COMMENT 'motivo da rejeição, falha da geração ou nota da aprovação',{_TIMESTAMPS},
+  PRIMARY KEY (id),
+  KEY ix_customer_reports_status (status),
+  KEY ix_customer_reports_customer (customer_id, competencia),
+  CONSTRAINT fk_customer_reports_customer FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
+) {_TABLE_OPTIONS} COMMENT='relatórios gerados por cliente e a revisão antes do envio'"""),
 ]
 
 TABLE_NAMES = [name for name, _ in TABLES]
@@ -65,4 +89,6 @@ ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("customer_services", "external_name", "external_name VARCHAR(255) NULL COMMENT 'nome ou identificador do cliente na plataforma (vazio = customers.name)' AFTER service_id"),
     ("customer_services", "products", "products VARCHAR(512) NULL COMMENT 'produtos contratados nesse serviço (ex.: Acronis EDR Security; Acronis Advanced Management)' AFTER external_name"),
     ("customer_services", "contracted_devices", "contracted_devices INT UNSIGNED NULL COMMENT 'dispositivos contratados' AFTER products"),
+    ("customers", "active", "active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 = inativo (POC, trial, cadastro antigo): fora do fechamento mensal' AFTER desk_manager_id"),
+    ("customers", "inactive_reason", "inactive_reason VARCHAR(255) NULL COMMENT 'motivo da inativação' AFTER active"),
 ]

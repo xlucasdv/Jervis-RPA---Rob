@@ -235,5 +235,7 @@ def test_cli_notify_test_and_secrets(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
     assert cli.main(["-c", "platforms.yaml", "notify", "test"]) == 0
     assert "webhook: enviado" in capsys.readouterr().out
-    assert json.loads(sent[0].data)["execucao"]["id"] == "teste"
+    assert json.loads(sent[0].data)["assunto"] == "[Jervis3000] Teste de notificação"
+    assert cli.main(["-c", "platforms.yaml", "notify", "test", "--status", "falha"]) == 0  # prévia do aviso de coleta
+    assert json.loads(sent[1].data)["execucao"]["id"] == "teste"
     assert "https://hooks.empresa.com/x" not in (tmp_path / "platforms.yaml").read_text(encoding="utf-8")

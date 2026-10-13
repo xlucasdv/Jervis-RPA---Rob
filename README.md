@@ -58,7 +58,10 @@ mantém atualizado o driver do Edge ([instalação](docs/instalacao.md#driver-do
 | `jervis notify set-smtp-password / set-webhook / test` | Notificações por e-mail e Teams/Slack |
 | `jervis audit [--verify]` | Trilha de auditoria (quem coletou e quem alterou a configuração) |
 | `jervis config show` | Configuração efetiva (base + ambiente) |
+| `jervis customers duplicates / merge / deactivate / activate` | Limpeza do cadastro: sugestões de duplicados e POCs, junção de cadastros, clientes inativos (fora do fechamento) |
 | `jervis customers add / list / show / update / remove / link / unlink` | Clientes no banco e os serviços de cada um (com chave MFA criptografada) |
+| `jervis month-close [--month AAAA-MM]` | Fechamento mensal: relatórios do mês anterior de todos os clientes, pendentes de revisão, com aviso no Teams (agendável: `task: relatorios_clientes`) |
+| `jervis reviews list / open / approve / reject` | Revisão dos relatórios por cliente antes do envio (registra quem aprovou e quando) |
 | `jervis services set-api-credentials / test-api <serviço>` | Credenciais de API no cofre (Acronis, Sophos Central, Zabbix, Desk Manager) e teste de acesso |
 | `jervis customers report <cliente> \| --all [--month AAAA-MM] [--ia]` | Coleta por API (Acronis, Sophos Central, Zabbix) e gera o Relatório Mensal, o Relatório Executivo e o `resumo.md` (padrão: mês atual); `--all`: todos os clientes vinculados |
 | `jervis services clients <serviço> [--import]` | Clientes que existem no Acronis/Sophos/Zabbix x cadastro; `--import` cadastra e vincula os que faltam |

@@ -41,7 +41,7 @@ def test_invalid_database_section(section, message):
 
 
 def test_tables_and_creation_order():
-    assert TABLE_NAMES == ["customers", "service", "customer_services"]  # referenciadas antes
+    assert TABLE_NAMES == ["customers", "service", "customer_services", "customer_reports"]  # referenciadas antes
     ddl = dict(TABLES)
     assert all(sql.lstrip().startswith(f"CREATE TABLE IF NOT EXISTS {name} (") for name, sql in TABLES)
     assert "desk_manager_id" in ddl["customers"] and "name VARCHAR(255) NOT NULL" in ddl["customers"]
@@ -111,7 +111,7 @@ def store(memory_keyring):
 def test_ensure_schema_creates_only_missing_tables(store):
     server = FakeServer(existing={"customers"})
     created = db.ensure_schema(DB, store, connector=server)
-    assert created == ["service", "customer_services"]
+    assert created == ["service", "customer_services", "customer_reports"]
     assert server.executed[0].startswith("CREATE DATABASE IF NOT EXISTS `jervis_teste`")
     assert not any("CREATE TABLE IF NOT EXISTS customers" in sql for sql in server.executed)
     assert server.connections[0]["database"] is None and server.connections[1]["database"] == "jervis_teste"
@@ -126,7 +126,7 @@ def test_ensure_schema_adds_new_columns_to_old_tables(store):
     server = FakeServer(existing=TABLE_NAMES, columns=set())  # banco criado na 1ª versão
     created = db.ensure_schema(DB, store, connector=server)
     assert created == ["service.mfa_secret_encrypted", "customer_services.external_name", "customer_services.products",
-                       "customer_services.contracted_devices"]
+                       "customer_services.contracted_devices", "customers.active", "customers.inactive_reason"]
     alters = [sql for sql in server.executed if sql.startswith("ALTER TABLE")]
     assert alters[0].startswith("ALTER TABLE `service` ADD COLUMN mfa_secret_encrypted") and alters[0].endswith("AFTER settings")
     assert "DROP" not in " ".join(server.executed)

@@ -48,7 +48,15 @@ def _at(day: datetime, hhmm: str) -> datetime:
 def next_run(schedule: ScheduleConfig, after: datetime) -> datetime:
     """Próximo horário de execução estritamente depois de ``after``."""
     candidates: list[datetime] = []
-    if schedule.frequency in ("daily", "weekly"):
+    if schedule.frequency == "monthly":
+        year, month = after.year, after.month
+        for _ in range(3):
+            day = after.replace(year=year, month=month, day=schedule.day)
+            candidates += [t for t in (_at(day, hhmm) for hhmm in schedule.times) if t > after]
+            if candidates:
+                break
+            year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    elif schedule.frequency in ("daily", "weekly"):
         for offset in range(8):
             day = after + timedelta(days=offset)
             if schedule.frequency == "weekly" and WEEKDAYS[day.weekday()] not in schedule.days:
@@ -72,6 +80,8 @@ def describe(schedule: ScheduleConfig) -> str:
     times = ", ".join(schedule.times)
     if schedule.frequency == "daily":
         return f"diariamente às {times}"
+    if schedule.frequency == "monthly":
+        return f"mensalmente no dia {schedule.day} às {times}"
     if schedule.frequency == "weekly":
         return f"semanalmente ({', '.join(_DAY_LABEL[d] for d in schedule.days)}) às {times}"
     return f"a cada {schedule.every_hours} hora(s) a partir das {schedule.start}"
@@ -100,8 +110,9 @@ def create_commands(schedule: ScheduleConfig, wrapper: Path, env: str | None = N
             f'schtasks /Create /F /TN "{task_names(schedule, env)[0]}" {target} /SC DAILY /ST {schedule.start} '
             f"/RI {schedule.every_hours * 60} /DU 23:59"
         ]
-    days = f" /D {','.join(d.upper() for d in schedule.days)}" if schedule.frequency == "weekly" else ""
-    trigger = "WEEKLY" if schedule.frequency == "weekly" else "DAILY"
+    days = (f" /D {','.join(d.upper() for d in schedule.days)}" if schedule.frequency == "weekly"
+            else f" /D {schedule.day}" if schedule.frequency == "monthly" else "")
+    trigger = {"weekly": "WEEKLY", "monthly": "MONTHLY"}.get(schedule.frequency, "DAILY")
     return [
         f'schtasks /Create /F /TN "{name}" {target} /SC {trigger}{days} /ST {hhmm}'
         for name, hhmm in zip(task_names(schedule, env), schedule.times)

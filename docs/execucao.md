@@ -115,6 +115,7 @@ jervis schedule install --dry-run    # mostra os comandos do Agendador de Tarefa
 jervis schedule install              # registra (pasta "Jervis3000" do Agendador de Tarefas)
 jervis schedule uninstall            # remove
 jervis schedule run diaria           # executa um agendamento agora, exatamente como a tarefa faria
+jervis schedule run fechamento_mensal  # fechamento mensal agora (mês anterior), como a tarefa do dia 1
 ```
 
 - As tarefas rodam com o **seu usuário do Windows**, que tem acesso às credenciais cadastradas, enquanto você
@@ -126,6 +127,36 @@ jervis schedule run diaria           # executa um agendamento agora, exatamente 
   quando a versão principal muda ([instalação](instalacao.md#driver-do-navegador-em-máquinas-corporativas)).
 - Sem acesso ao Agendador de Tarefas (ou fora do Windows): `jervis schedule serve` mantém um agendador em
   primeiro plano com as mesmas regras.
+
+## Fechamento mensal e revisão
+
+No dia 1 às 06:00 (agendamento `fechamento_mensal`), o Jervis gera os relatórios do **mês anterior** de todos os
+clientes vinculados (Relatório Mensal, Relatório Executivo e `resumo.md`), registra cada um como **pendente de
+revisão** e avisa a equipe no Teams. A equipe revisa, aprova e envia ao cliente; o Jervis registra quem aprovou
+e quando.
+
+```powershell
+jervis month-close                      # roda o fechamento agora (padrão: mês anterior)
+jervis month-close --month 2026-09      # um mês específico; --no-notify não avisa a equipe
+jervis reviews list                     # pendentes (ou --status aprovado | rejeitado | falha | todos; --month AAAA-MM)
+jervis reviews open "CERMISSOES"        # abre o relatório executivo para conferir
+jervis reviews approve "CERMISSOES"     # aprova (--note "...") e mostra os PDFs para enviar ao cliente
+jervis reviews reject "CERMISSOES" --reason "dados do Zabbix incompletos"
+jervis reviews approve "#12"            # pelo número da revisão (#id), em vez do cliente
+```
+
+- Cada geração por `jervis customers report` (de um cliente ou `--all`) também entra na revisão. Uma nova geração
+  do mesmo cliente e mês **substitui** a pendente anterior (situação "substituído").
+- Situações: **pendente** (aguardando revisão), **aprovado**, **rejeitado** (com o motivo; gere de novo com
+  `jervis customers report "<cliente>" --month AAAA-MM`), **substituído** e **falha** (nada foi coletado; não há
+  o que revisar).
+- O aviso no Teams traz quantos relatórios aguardam revisão e lista os clientes com falha ou com alguma
+  plataforma que falhou. Configure a URL do fluxo do Teams com `jervis notify set-webhook` e `webhook: true` em
+  `notifications`. Sem canal configurado, o fechamento roda e só avisa no terminal e no log.
+- Para o fechamento rodar às 06:00 do dia 1, a máquina precisa estar ligada, com a sessão do usuário aberta (ou a
+  tarefa configurada para rodar desconectada) e o **Docker Desktop** em execução (banco MySQL). A saída fica em
+  `logs/agendamento-fechamento_mensal.log`.
+- Aprovações, rejeições e fechamentos ficam na auditoria (`jervis audit --event relatorio`).
 
 ## Monitoramento da própria ferramenta
 
