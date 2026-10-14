@@ -5,6 +5,7 @@ Só biblioteca padrão (urllib). Erros viram ``ApiError`` com mensagem para o op
 
 from __future__ import annotations
 
+import codecs
 import json
 import time
 import urllib.error
@@ -17,6 +18,14 @@ from jervis.security import redact
 
 DEFAULT_TIMEOUT = 60
 _RETRY_STATUS = {429, 502, 503, 504}
+
+# Respostas UTF-8 com um ou outro byte em Latin-1 (visto no Acronis: nome com "ã" numa atividade): o byte inválido
+# é lido como Latin-1 em vez de derrubar a leitura da resposta inteira
+codecs.register_error("jervis_latin1", lambda err: (err.object[err.start:err.end].decode("latin-1"), err.end))
+
+
+def decode_body(raw: bytes) -> str:
+    return raw.decode("utf-8-sig", errors="jervis_latin1")
 
 
 class ApiError(JervisError):
@@ -59,7 +68,7 @@ class HttpClient:
             try:
                 with self._open(req, timeout=self.timeout) as response:
                     raw = response.read()
-                return json.loads(raw) if raw.strip() else None
+                return json.loads(decode_body(raw)) if raw.strip() else None
             except urllib.error.HTTPError as exc:
                 detail = _error_detail(exc)
                 if exc.code in _RETRY_STATUS and attempt < self.retries:

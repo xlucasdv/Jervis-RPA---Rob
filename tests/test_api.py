@@ -56,6 +56,12 @@ def test_http_retries_transient_errors_then_reports_status():
     assert info.value.status == 503 and len(calls) == 3
 
 
+def test_http_reads_stray_latin1_bytes_in_utf8_response():
+    raw = '{"items": [{"resource": "PC-JOÃO", "user": "'.encode() + "joão".encode("latin-1") + b'"}]}'
+    client = HttpClient("https://x.example.com", "teste", opener=lambda request, timeout=None: io.BytesIO(raw))
+    assert client.get("/coisa") == {"items": [{"resource": "PC-JOÃO", "user": "joão"}]}
+
+
 # --- Acronis --------------------------------------------------------------------------
 
 
