@@ -409,8 +409,18 @@ def sophos_endpoint_row(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Caracteres de controle (ex.: trecho binário de certificado na descrição de alerta do firewall): o Excel recusa
+# e sujam o HTML/PDF; tab e quebra de linha ficam
+CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _clean_text(value: Any) -> Any:
+    return CONTROL_CHARS.sub("", value).strip() if isinstance(value, str) else value
+
+
 def sophos_alert_row(alert: dict[str, Any]) -> dict[str, Any]:
     severity = alert.get("severity")
+    alert = {**alert, "description": _clean_text(alert.get("description"))}
     return {
         "data_hora": alert.get("raisedAt"),
         "data_hora_iso": local_iso(alert.get("raisedAt")),

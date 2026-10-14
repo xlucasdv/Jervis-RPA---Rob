@@ -82,6 +82,23 @@ def test_month_close_reports_notification_failure(monkeypatch):
     assert "Aviso à equipe por webhook não enviado: NotificationError: URL do webhook não cadastrada" in lines
 
 
+def test_unexpected_error_in_one_customer_does_not_stop_the_close(monkeypatch):
+    recorded = []
+    monkeypatch.setattr(repository, "record_report", lambda conn, cid, comp, period, run_dir, result, origin, user, note=None:
+                        recorded.append((cid, result, note)) or len(recorded))
+    run_customer, _ = fake_runner()
+
+    def crashing(config, store, conn, ref, **kwargs):
+        if ref == "1":
+            raise ValueError("caractere inválido na planilha")
+        return run_customer(config, store, conn, ref, **kwargs)
+
+    outcomes = closing.close_month(None, None, FakeConn(), None, crashing,
+                                   lambda c: [Customer(1, "C1", None), Customer(2, "C2", None)], emit=lambda line: None, now=NOW)
+    assert [o.resultado for o in outcomes] == ["falha", "sucesso"]
+    assert recorded[0] == (1, "falha", "erro inesperado (ValueError): caractere inválido na planilha")
+
+
 # --- aviso pelo Teams -------------------------------------------------------------------
 
 

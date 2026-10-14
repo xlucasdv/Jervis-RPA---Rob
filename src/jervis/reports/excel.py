@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
@@ -133,7 +134,7 @@ def _records_sheet(ws: Worksheet, records: list[dict[str, Any]], data: dict[str,
                 value = " | ".join(value) if value else None
             elif key in ("data_evento", "data_coleta"):
                 value = _to_datetime(value)
-            cell = ws.cell(row, col, value)
+            cell = ws.cell(row, col, _clean(value))
             if isinstance(value, datetime):
                 cell.number_format = "dd/mm/yyyy hh:mm"
             if key in ("mensagem", "observacoes", "status"):
@@ -166,9 +167,14 @@ def _quality_sheet(ws: Worksheet, data: dict[str, Any]) -> None:
         _header(ws, start, ["Plataforma", "Categoria", "Origem", "Motivo"])
         for i, x in enumerate(v["descartados"], start + 1):
             for col, key in enumerate(("plataforma", "categoria", "origem", "motivo"), 1):
-                ws.cell(i, col, x.get(key))
+                ws.cell(i, col, _clean(x.get(key)))
     for col, width in enumerate((44, 30, 26, 60), 1):
         ws.column_dimensions[get_column_letter(col)].width = width
+
+
+def _clean(value: Any) -> Any:
+    """O Excel recusa caracteres de controle (vindos, por exemplo, de descrições de alertas): ficam de fora."""
+    return ILLEGAL_CHARACTERS_RE.sub("", value) if isinstance(value, str) else value
 
 
 def _header(ws: Worksheet, row: int, titles: list[str]) -> None:

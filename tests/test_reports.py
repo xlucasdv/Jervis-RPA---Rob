@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 from jervis import cli
 from jervis.config import Settings
 from jervis.consolidation import consolidate
-from jervis.reports import generate_reports
+from jervis.reports import excel, generate_reports
 from jervis.reports.data import executive_summary
 from jervis.reports.html import format_datetime
 
@@ -129,6 +129,10 @@ def test_excel_workbook(consolidated, tmp_path):
     assert isinstance(sheet.cell(2, 11).value, datetime)  # datas como datas do Excel
     assert sheet.freeze_panes == "C2" and sheet.auto_filter.ref
     assert wb["acronis"].max_row == 4  # cabeçalho + 3 tarefas
+
+
+def test_excel_drops_control_characters():
+    assert excel._clean("botnet null\x00\x13 0U digicert\x01") == "botnet null 0U digicert" and excel._clean(3) == 3
 
 
 def test_csv_consolidated_and_per_platform(consolidated, tmp_path):

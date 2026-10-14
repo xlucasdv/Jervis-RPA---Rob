@@ -254,3 +254,8 @@ def test_suspicious_item_is_not_reported_as_an_active_threat():
     assert s["ameacas_ativas"]["quantidade"] == 0 and s["itens_suspeitos"] == {"quantidade": 1, "maquinas": ["QEE-04"]}
     assert {r["chave"]: r["criticidade"] for r in m["recomendacoes"]} == {"sophos_suspeitos": "media"}
     assert "nenhum com ameaça ativa e 1 com item suspeito pendente." in executive.build(m, [], [], issued=NOW)["sumario"][0]
+
+
+def test_alert_description_drops_control_characters():
+    row = collect.sophos_alert_row({"description": "botnet null\x00\x13 digicert\x01 ", "severity": "high"})
+    assert row["descricao"] == "botnet null digicert" and row["tipo"] == "botnet null digicert"

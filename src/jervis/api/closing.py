@@ -9,6 +9,7 @@ aprovação (``jervis reviews approve``).
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,6 +19,8 @@ from jervis.api import collect
 from jervis.db import repository
 from jervis.errors import JervisError
 from jervis.security import redact
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,8 +67,10 @@ def run_customers(config, store, conn, customers: list[repository.Customer], per
         emit(f"[{index}/{len(customers)}] {customer.name}")
         try:
             run = run_customer(config, store, conn, str(customer.id), period=period, formats=formats, ai=ai, emit=emit)
-        except JervisError as exc:
-            reason = redact(str(exc))
+        except Exception as exc:  # noqa: BLE001 - um erro inesperado num cliente não interrompe o fechamento
+            reason = redact(str(exc)) if isinstance(exc, JervisError) else f"erro inesperado ({type(exc).__name__}): {redact(str(exc))[:300]}"
+            if not isinstance(exc, JervisError):
+                log.exception("Relatório de %s interrompido por erro inesperado", customer.name)
             emit(f"  FALHA: {reason}")
             report_id = repository.record_report(conn, customer.id, f"{period.since:%Y-%m}" if period.monthly else None,
                                                  period.label, None, "falha", origin, user, reason)
