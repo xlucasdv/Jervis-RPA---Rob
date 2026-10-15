@@ -1,6 +1,6 @@
 # Jervis3000
 
-Ferramenta da Contego Security que coleta dados de segurança, backup e monitoramento dos clientes e gera os
+Ferramenta que coleta dados de segurança, backup e monitoramento dos clientes e gera os
 relatórios mensais. A coleta é feita pelas APIs do **Acronis Cyber Protect Cloud** (contas BR e US), do
 **Sophos Central** e do **Zabbix**. Todo mês, o Jervis gera sozinho os relatórios de todos os clientes. A equipe
 revisa e aprova pelo navegador ou pelo terminal, e depois envia ao cliente.
