@@ -441,9 +441,10 @@ def list_competencias(conn) -> list[str]:
         return [row[0] for row in cur.fetchall()]
 
 
-# --- usuários da interface web ----------------------------------------------------------
+# --- contas da interface web --------------------------------------------------------------
 
 WEB_ROLES = ("leitura", "revisor", "admin")
+LOCK_AFTER, LOCK_MINUTES = 5, 15  # tentativas erradas seguidas e minutos de bloqueio
 
 
 @dataclass
@@ -453,27 +454,39 @@ class WebUser:
     name: str | None
     role: str
     active: bool
-    entra_oid: str | None
+    password_hash: str
+    must_change_password: bool
+    mfa_secret_encrypted: str | None
+    mfa_last_step: int | None
+    failed_attempts: int
+    locked_until: Any
+    session_epoch: int
     last_login_at: Any
 
+    @property
+    def mfa_configured(self) -> bool:
+        return bool(self.mfa_secret_encrypted)
 
-_WEB_USER_COLUMNS = "id, email, name, role, active, entra_oid, last_login_at"
+
+_WEB_USER_COLUMNS = ("id, email, name, role, active, password_hash, must_change_password, mfa_secret_encrypted, "
+                     "mfa_last_step, failed_attempts, locked_until, session_epoch, last_login_at")
 
 
 def _web_user(row) -> WebUser:
-    return WebUser(row[0], row[1], row[2], row[3], bool(row[4]), row[5], row[6])
+    return WebUser(row[0], row[1], row[2], row[3], bool(row[4]), row[5], bool(row[6]), row[7], row[8], row[9] or 0,
+                   row[10], row[11] or 0, row[12])
 
 
 def normalize_email(email: str) -> str:
     email = (email or "").strip().lower()
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
-        raise RecordError(f"'{email}' não parece uma conta Microsoft 365 (nome@empresa.com.br).")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or len(email) > 255:
+        raise RecordError(f"'{email}' não parece um e-mail (nome@empresa.com.br).")
     return email
 
 
 def list_web_users(conn) -> list[WebUser]:
     with conn.cursor() as cur:
-        cur.execute(f"SELECT {_WEB_USER_COLUMNS} FROM web_users ORDER BY active DESC, email")
+        cur.execute(f"SELECT {_WEB_USER_COLUMNS} FROM web_users ORDER BY active DESC, name, email")
         return [_web_user(row) for row in cur.fetchall()]
 
 
@@ -491,34 +504,86 @@ def get_web_user(conn, user_id: int) -> WebUser | None:
     return _web_user(row) if row else None
 
 
-def add_web_user(conn, email: str, role: str, name: str | None = None) -> int:
+def require_web_user(conn, ref: int | str) -> WebUser:
+    """Conta pelo id (interface) ou pelo e-mail (terminal)."""
+    user = get_web_user(conn, ref) if isinstance(ref, int) else find_web_user(conn, ref)
+    if not user:
+        raise RecordError(f"Conta '{ref}' não encontrada. Veja 'jervis web users list'.")
+    return user
+
+
+def add_web_user(conn, email: str, name: str | None, role: str, password_hash: str) -> int:
+    """Nova conta com senha temporária (troca obrigatória no primeiro login)."""
     email = normalize_email(email)
     if role not in WEB_ROLES:
         raise RecordError(f"Perfil '{role}' inválido. Opções: {', '.join(WEB_ROLES)}.")
     if find_web_user(conn, email):
-        raise RecordError(f"{email} já tem acesso. Para mudar o perfil: jervis web users role {email} <perfil>.")
+        raise RecordError(f"Já existe uma conta para {email}.")
     with conn.cursor() as cur:
-        cur.execute("INSERT INTO web_users (email, name, role) VALUES (%s, %s, %s)", (email, _blank_to_none(name), role))
+        cur.execute("INSERT INTO web_users (email, name, role, password_hash, must_change_password) VALUES (%s, %s, %s, %s, 1)",
+                    (email, _blank_to_none(name), role, password_hash))
         return cur.lastrowid
 
 
-def update_web_user(conn, email: str, role: str | None = None, active: bool | None = None) -> WebUser:
-    user = find_web_user(conn, email)
-    if not user:
-        raise RecordError(f"{email} não tem acesso à interface. Veja 'jervis web users list'.")
+def active_admins(conn) -> int:
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM web_users WHERE role = 'admin' AND active = 1")
+        return cur.fetchone()[0]
+
+
+def update_web_user(conn, ref: int | str, role: str | None = None, active: bool | None = None,
+                    name: str | None = None) -> WebUser:
+    """Perfil, nome ou situação. Suspender derruba as sessões abertas. Não deixa o Jervis sem admin ativo."""
+    user = require_web_user(conn, ref)
     if role is not None and role not in WEB_ROLES:
         raise RecordError(f"Perfil '{role}' inválido. Opções: {', '.join(WEB_ROLES)}.")
+    losing_admin = user.role == "admin" and user.active and ((role and role != "admin") or active is False)
+    if losing_admin and active_admins(conn) <= 1:
+        raise RecordError("Essa é a única conta admin ativa: crie ou promova outro admin antes.")
     with conn.cursor() as cur:
-        cur.execute("UPDATE web_users SET role = COALESCE(%s, role), active = COALESCE(%s, active) WHERE id = %s",
-                    (role, None if active is None else int(active), user.id))
+        cur.execute("UPDATE web_users SET role = COALESCE(%s, role), active = COALESCE(%s, active), "
+                    "name = COALESCE(%s, name), session_epoch = session_epoch + %s WHERE id = %s",
+                    (role, None if active is None else int(active), _blank_to_none(name),
+                     1 if active is False or (role and role != user.role) else 0, user.id))
     return get_web_user(conn, user.id)
 
 
-def record_web_login(conn, user_id: int, entra_oid: str | None, name: str | None) -> None:
-    """Primeiro login grava o ID da conta no Entra ID; os seguintes só atualizam nome e horário."""
+def set_web_password(conn, user_id: int, password_hash: str, temporary: bool) -> None:
+    """Nova senha (temporária, definida pelo admin, ou a escolhida pela pessoa). Desbloqueia a conta e derruba as
+    outras sessões."""
     with conn.cursor() as cur:
-        cur.execute("UPDATE web_users SET entra_oid = COALESCE(entra_oid, %s), name = COALESCE(%s, name), "
-                    "last_login_at = NOW() WHERE id = %s", (entra_oid, _blank_to_none(name), user_id))
+        cur.execute("UPDATE web_users SET password_hash = %s, must_change_password = %s, password_changed_at = NOW(), "
+                    "failed_attempts = 0, locked_until = NULL, session_epoch = session_epoch + 1 WHERE id = %s",
+                    (password_hash, int(temporary), user_id))
+
+
+def set_web_mfa(conn, user_id: int, secret_encrypted: str | None, last_step: int | None = None) -> None:
+    """Grava a chave do app autenticador (ou apaga, para configurar de novo no próximo login)."""
+    with conn.cursor() as cur:
+        cur.execute("UPDATE web_users SET mfa_secret_encrypted = %s, mfa_last_step = %s, "
+                    "session_epoch = session_epoch + %s WHERE id = %s",
+                    (secret_encrypted, last_step, 0 if secret_encrypted else 1, user_id))
+
+
+def use_mfa_step(conn, user_id: int, step: int) -> None:
+    with conn.cursor() as cur:
+        cur.execute("UPDATE web_users SET mfa_last_step = %s WHERE id = %s", (step, user_id))
+
+
+def record_web_failure(conn, user_id: int) -> bool:
+    """Tentativa errada (senha ou código). Devolve True se a conta acabou de ser bloqueada."""
+    with conn.cursor() as cur:
+        cur.execute("UPDATE web_users SET failed_attempts = failed_attempts + 1, "
+                    "locked_until = IF(failed_attempts >= %s, NOW() + INTERVAL %s MINUTE, locked_until) WHERE id = %s",
+                    (LOCK_AFTER, LOCK_MINUTES, user_id))
+        cur.execute("SELECT failed_attempts FROM web_users WHERE id = %s", (user_id,))
+        return cur.fetchone()[0] == LOCK_AFTER
+
+
+def record_web_login(conn, user_id: int) -> None:
+    with conn.cursor() as cur:
+        cur.execute("UPDATE web_users SET failed_attempts = 0, locked_until = NULL, last_login_at = NOW() WHERE id = %s",
+                    (user_id,))
 
 
 def _blank_to_none(value: str | None) -> str | None:

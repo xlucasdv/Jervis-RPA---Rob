@@ -8,7 +8,6 @@ const ICON = {
 };
 const RESULT_LABEL = { sucesso: "Completo", parcial: "Com limitações", falha: "Sem dados" };
 const STATE_LABEL = { pendente: "Pendente", aprovado: "Aprovado", rejeitado: "Rejeitado", falha: "Falha" };
-const ROLE_LABEL = { leitura: "Leitura", revisor: "Revisor", admin: "Administrador" };
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const FILTERS = [["pendente", "Pendentes"], ["parcial", "Com limitações"], ["falha", "Falhas"], ["aprovado", "Aprovados"], ["rejeitado", "Rejeitados"], ["todos", "Todos"]];
 const COUNT_LABEL = { maquinas: "máquinas", alertas: "alertas", atividades: "atividades", dispositivos: "dispositivos", hosts: "hosts", problemas: "problemas", disponibilidade: "indicadores" };
@@ -17,40 +16,16 @@ const state = {
   me: null, month: null, reports: [], jobs: [], filter: "pendente", query: "",
   selected: new Set(), openId: null, detail: null, rejecting: false, confirmBulk: false, busy: false
 };
-const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const { $, esc, api, toast } = J;
 const monthLabel = m => m ? `${MONTHS[+m.slice(5, 7) - 1]}/${m.slice(0, 4)}` : "";
 const canReview = () => state.me && (state.me.perfil === "revisor" || state.me.perfil === "admin");
 const isAdmin = () => state.me && state.me.perfil === "admin";
-
-async function api(path, options = {}) {
-  const init = { method: options.method || "GET", headers: { Accept: "application/json" }, credentials: "same-origin" };
-  if (init.method !== "GET") {
-    init.headers["Content-Type"] = "application/json";
-    init.headers["X-CSRF-Token"] = state.me ? state.me.csrf : "";
-    init.body = JSON.stringify(options.body || {});
-  }
-  const response = await fetch(path, init);
-  if (response.status === 401) { location.href = "/login"; throw new Error("Sessão expirada."); }
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.erro || `Erro ${response.status}`);
-  return data;
-}
-
-let toastTimer;
-function toast(message, bad = false) {
-  const t = $("toast");
-  t.textContent = message; t.className = bad ? "toast bad" : "toast"; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, bad ? 7000 : 4000);
-}
 
 // --- carga ------------------------------------------------------------------------------
 
 async function start() {
   try {
-    state.me = await api("/api/me");
-    $("userName").textContent = state.me.nome;
-    $("userRole").textContent = ROLE_LABEL[state.me.perfil] || state.me.perfil;
+    state.me = await J.loadMe();
     const overview = await api("/api/overview");
     $("nextClose").textContent = overview.proximo_fechamento ? `Próximo fechamento: ${overview.proximo_fechamento}` : "";
     const months = overview.competencias;
@@ -271,11 +246,6 @@ document.addEventListener("click", event => {
   const t = event.target.closest("button, input, tr, a, .scrim");
   if (!t || t.tagName === "A") return;
   if (t.id === "scrim" || t.hasAttribute("data-close")) { state.openId = null; state.rejecting = false; return render(); }
-  if (t.id === "logout") {
-    fetch("/logout", { method: "POST", headers: { "X-CSRF-Token": state.me ? state.me.csrf : "" }, credentials: "same-origin" })
-      .finally(() => { location.href = "/saiu"; });
-    return;
-  }
   if (t.dataset.f) { state.filter = t.dataset.f; return render(); }
   if (t.dataset.sel) { const id = +t.dataset.sel; t.checked ? state.selected.add(id) : state.selected.delete(id); state.confirmBulk = false; return render(); }
   if (t.id === "checkAll") {

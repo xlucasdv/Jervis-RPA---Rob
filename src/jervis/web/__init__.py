@@ -1,5 +1,5 @@
-"""Interface web da equipe (jervis web serve): revisão dos relatórios mensais, com login Microsoft 365."""
+"""Interface web da equipe (jervis web serve): revisão dos relatórios mensais, com contas próprias do Jervis."""
 
-from jervis.web.app import CLIENT_SECRET, ROLE_LEVEL, create_app
+from jervis.web.app import ROLE_LEVEL, create_app
 
-__all__ = ["CLIENT_SECRET", "ROLE_LEVEL", "create_app"]
+__all__ = ["ROLE_LEVEL", "create_app"]

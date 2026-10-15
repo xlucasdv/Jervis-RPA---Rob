@@ -87,11 +87,18 @@ CREATE TABLE IF NOT EXISTS web_users (
   name VARCHAR(255) NULL COMMENT 'nome exibido (vem do login)',
   role VARCHAR(16) NOT NULL COMMENT 'leitura | revisor | admin',
   active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 = acesso suspenso',
-  entra_oid CHAR(36) NULL COMMENT 'ID da conta no Entra ID, gravado no primeiro login (e-mail reaproveitado não herda o acesso)',
+  password_hash VARCHAR(255) CHARACTER SET ascii NOT NULL COMMENT 'scrypt com sal; a senha nunca é guardada',
+  must_change_password TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1 = senha temporária: troca obrigatória no próximo login',
+  password_changed_at DATETIME NULL,
+  mfa_secret_encrypted VARCHAR(1024) CHARACTER SET ascii NULL COMMENT 'chave do app autenticador, criptografada com Fernet',
+  mfa_last_step BIGINT NULL COMMENT 'último código aceito (o mesmo código não vale duas vezes)',
+  failed_attempts INT UNSIGNED NOT NULL DEFAULT 0,
+  locked_until DATETIME NULL COMMENT 'bloqueio por tentativas erradas',
+  session_epoch INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'muda ao trocar senha/suspender: derruba sessões abertas',
   last_login_at DATETIME NULL,{_TIMESTAMPS},
   PRIMARY KEY (id),
   UNIQUE KEY uq_web_users_email (email)
-) {_TABLE_OPTIONS} COMMENT='quem pode entrar na interface web e com qual perfil'"""))
+) {_TABLE_OPTIONS} COMMENT='contas da interface web: perfil, senha (hash), app autenticador'"""))
 
 TABLE_NAMES = [name for name, _ in TABLES]
 

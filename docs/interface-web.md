@@ -3,100 +3,42 @@
 A interface é um site interno onde a equipe revisa os relatórios do fechamento mensal. Pelo navegador, dá para ver o
 que foi gerado, abrir os PDFs, aprovar, rejeitar e pedir uma nova geração.
 
-- **Entrada:** com a conta Microsoft 365 de cada pessoa. Só entra quem tem acesso liberado no Jervis.
+- **Contas:** são próprias do Jervis. O administrador cria o login de cada colega na página **Usuários**, e o
+  Jervis gera uma senha temporária. No primeiro acesso, a pessoa cria a senha dela e configura o app autenticador
+  (código de 6 dígitos no celular).
 - **Perfis:**
 
   | Perfil | Pode |
   |---|---|
   | `leitura` | ver os relatórios e abrir os arquivos |
   | `revisor` | também aprovar (um ou vários de uma vez) e rejeitar com motivo |
-  | `admin` | também gerar de novo um relatório e voltar uma revisão para pendente |
+  | `admin` | também gerar de novo, voltar uma revisão para pendente e administrar as contas |
 
-- **Acesso:** só pela rede interna ou pela VPN, sempre por HTTPS. Conexões de fora dessas redes são recusadas.
-- **Registro:** cada login, aprovação, rejeição e arquivo aberto vai para a trilha de auditoria (`jervis audit`),
-  com o e-mail da pessoa e o IP. Na revisão, fica gravado quem aprovou.
+- **Proteções:**
+  - acesso só pela rede interna ou pela VPN, sempre por HTTPS;
+  - senhas guardadas só como hash (scrypt);
+  - a conta é bloqueada por 15 minutos depois de 5 tentativas erradas, e cada computador tem um limite de
+    tentativas;
+  - trocar a senha, suspender a conta ou mudar o perfil encerra as sessões abertas da pessoa.
+- **Registro:** cada login, aprovação, rejeição, arquivo aberto e mudança de conta vai para a trilha de auditoria
+  (`jervis audit`), com o e-mail da pessoa e o IP. Senhas nunca são registradas.
 
-O Jervis só pede à Microsoft a identificação da pessoa (nome e e-mail). Ele não recebe acesso a e-mails, arquivos
-nem ao Teams.
+## 1. Criar a sua conta de admin (uma vez)
 
-## 1. Registrar o Jervis no Entra ID (administrador do Microsoft 365)
-
-Faça uma vez só.
-
-1. Abra o [Centro de administração do Microsoft Entra](https://entra.microsoft.com) e vá em
-   **Aplicativos > Registros de aplicativo > Novo registro**.
-2. Preencha:
-   - **Nome:** `Jervis3000`.
-   - **Tipos de conta com suporte:** *Somente contas deste diretório organizacional* (um único locatário).
-   - **URI de Redirecionamento:** plataforma **Web**, endereço `https://<máquina>:8443/auth/callback`.
-     O endereço exato aparece em `jervis web check`; neste PC é `https://ctgnotcwb010:8443/auth/callback`.
-3. Na página do aplicativo, em **Visão geral**, copie:
-   - **ID do aplicativo (cliente)**, que vai em `client_id`;
-   - **ID do diretório (locatário)**, que vai em `tenant_id`.
-4. Em **Certificados e segredos > Novo segredo do cliente**, crie um segredo com validade de 12 ou 24 meses. Copie
-   o **Valor** na hora, porque ele aparece só uma vez. Ele vai para o cofre no passo 2, nunca para arquivos nem
-   para o chat.
-5. **Permissões de API:** deixe só a padrão (`User.Read`, delegada). O Jervis não precisa de mais nada.
-6. **Opcional, recomendado:** em **Aplicativos empresariais > Jervis3000 > Propriedades**, ligue
-   **Atribuição obrigatória**. Depois, em **Usuários e grupos**, inclua só a equipe. Assim a própria Microsoft já
-   barra quem não for da equipe, antes mesmo do Jervis.
-
-Anote quando o segredo vence. Antes disso, crie um novo segredo e repita o passo 2.
-
-## 2. Configurar o Jervis
-
-Na seção `web` de `config/platforms.yaml`:
-
-```yaml
-web:
-  public_url: https://ctgnotcwb010:8443
-  tenant_id: <ID do diretório>
-  client_id: <ID do aplicativo>
-  port: 8443
-```
-
-Depois, no terminal:
+No PowerShell, na pasta do Jervis:
 
 ```powershell
-jervis web set-secret                                   # cola o Valor do segredo (não aparece na tela)
-jervis web cert                                         # certificado HTTPS desta máquina (já feito neste PC)
-jervis web users add voce@contego.com.br --role admin   # o seu acesso
-jervis web check                                        # tudo [ok]?
+jervis web users add seu.email@contego.com.br --name "Seu Nome" --role admin
 ```
 
-## 3. Liberar a equipe
+O comando mostra uma **senha temporária**, só nesse terminal. Ela vale até o primeiro login. Confira se está tudo
+pronto:
 
 ```powershell
-jervis web users add maria@contego.com.br --role revisor
-jervis web users add joao@contego.com.br --role leitura
-jervis web users list
-jervis web users role joao@contego.com.br revisor       # muda o perfil
-jervis web users disable maria@contego.com.br           # suspende na hora, mesmo com a sessão aberta
+jervis web check
 ```
 
-O e-mail é o da conta Microsoft 365, o mesmo do Teams. No primeiro login, o Jervis grava o ID da conta no Entra.
-Se o mesmo e-mail for reaproveitado depois para outra pessoa, ela não herda o acesso.
-
-## 4. Certificado nos computadores da equipe
-
-O certificado HTTPS é emitido por uma autoridade interna do Jervis (`config/web/jervis-ca.cer`). Em cada computador
-da equipe, instale esse arquivo uma vez:
-
-1. Dê dois cliques no arquivo e clique em **Instalar certificado**.
-2. Escolha **Máquina local**.
-3. Escolha **Colocar todos os certificados no repositório a seguir** e depois **Autoridades de Certificação Raiz
-   Confiáveis**.
-
-Outra opção é distribuir o arquivo por política de grupo (GPO). Sem ele, o navegador mostra o aviso "sua conexão
-não é particular".
-
-Na pasta `config/web` também ficam as chaves privadas (`*.key`). Elas nunca saem desta máquina: só o `.cer` é
-distribuído. A pasta não vai para o git.
-
-O certificado do servidor vale cerca de 13 meses, e `jervis web check` mostra quantos dias faltam. Para renovar,
-rode `jervis web cert --force`. A autoridade interna continua a mesma, então ninguém precisa reinstalar nada.
-
-## 5. Liberar a porta no firewall (administrador do Windows)
+## 2. Liberar a porta no firewall (administrador do Windows, uma vez)
 
 Num PowerShell **como administrador**, neste PC:
 
@@ -107,27 +49,98 @@ New-NetFirewallRule -DisplayName "Jervis3000 interface web" -Direction Inbound -
 
 Ajuste `-RemoteAddress` para as faixas do escritório e da VPN. Elas devem ser as mesmas de `allowed_networks`.
 
-## 6. Subir a interface
+Sem essa regra, a interface funciona só neste PC.
+
+## 3. Subir a interface
+
+Com o Docker Desktop (MySQL) rodando:
 
 ```powershell
 jervis web serve
 ```
 
-A equipe abre `https://ctgnotcwb010:8443` no navegador. A interface fica no ar enquanto o terminal estiver aberto:
-`Ctrl+C` para. O Docker (MySQL) precisa estar rodando.
+Deixe o terminal aberto. `Ctrl+C` desliga a interface. Endereço: **https://ctgnotcwb010:8443**.
 
-Neste PC, a interface só fica acessível enquanto ele estiver ligado e na rede. Para uso contínuo, o ideal é levar o
-Jervis para um servidor ou VM sempre ligados. A configuração é a mesma: muda só o `public_url`, e o endereço de
-retorno precisa ser atualizado no Entra ID.
+## 4. Primeiro acesso
+
+1. Abra o endereço e entre com o e-mail e a senha temporária.
+2. Crie a sua senha. Ela precisa ter ao menos 12 caracteres, e uma frase curta funciona bem.
+3. No celular, instale o Microsoft Authenticator ou o Google Authenticator, leia o QR code e digite o código.
+
+Nos próximos acessos, o Jervis pede a senha e o código do app.
+
+## 5. Criar as contas da equipe
+
+Na interface, vá em **Usuários > Nova conta** e preencha nome, e-mail e perfil. O Jervis mostra a senha temporária
+uma vez só. Passe para a pessoa por um canal privado, como uma conversa direta no Teams ou pessoalmente. No primeiro
+login, ela faz os passos 2 e 3 acima.
+
+Na mesma página:
+
+| Botão | Quando usar |
+|---|---|
+| **Nova senha** | A pessoa esqueceu a senha ou bloqueou a conta. Gera outra senha temporária. |
+| **Redefinir app** | A pessoa trocou de celular. Ela configura o app de novo no próximo login. |
+| **Suspender / Reativar** | A pessoa saiu da equipe. Ela é desconectada na hora. |
+| **Perfil** | Escolha na lista. A mudança vale na hora. |
+
+Você não pode suspender nem rebaixar a sua própria conta, e o Jervis nunca fica sem um admin ativo. Se você mesmo
+perder o acesso, pelo terminal deste PC:
+
+```powershell
+jervis web users reset-password seu.email@contego.com.br
+jervis web users reset-mfa seu.email@contego.com.br
+jervis web users list
+```
+
+## 6. Certificado nos computadores da equipe
+
+O certificado HTTPS é emitido por uma autoridade interna do Jervis (`config/web/jervis-ca.cer`). Sem ela instalada,
+o navegador mostra o aviso "sua conexão não é particular". Em cada computador da equipe, instale o arquivo uma vez:
+
+1. Dê dois cliques no arquivo e clique em **Instalar certificado**.
+2. Escolha **Máquina local**.
+3. Escolha **Colocar todos os certificados no repositório a seguir** e depois **Autoridades de Certificação Raiz
+   Confiáveis**.
+
+Outra opção é distribuir por política de grupo (GPO).
+
+Só o `.cer` é distribuído. As chaves (`*.key`) nunca saem deste PC, e a pasta `config/web` não vai para o git.
+
+O certificado do servidor vale cerca de 13 meses, e `jervis web check` mostra quantos dias faltam. Para renovar,
+rode `jervis web cert --force`; ninguém precisa reinstalar nada.
+
+## Configuração
+
+Seção `web` de `config/platforms.yaml`:
+
+```yaml
+web:
+  public_url: https://ctgnotcwb010:8443   # endereço que a equipe abre
+  mfa: todos                              # código do app autenticador: todos | admin | nenhum
+  port: 8443
+  # allowed_networks: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8]
+  # session_hours: 8                      # horas até pedir o login de novo
+```
+
+A chave do app autenticador de cada pessoa fica criptografada no banco, com a mesma chave que protege os segredos
+MFA das plataformas (`jervis db generate-key`). Guarde uma cópia segura dessa chave: sem ela, todos precisam configurar o
+app de novo.
+
+## Neste PC
+
+A interface fica acessível enquanto este notebook estiver ligado, na rede e com o terminal aberto. Para uso
+contínuo, o ideal é levar o Jervis para um servidor ou VM sempre ligados. Nesse caso, mude o `public_url` e rode
+`jervis web cert --force`.
 
 ## Problemas comuns
 
 | O que aparece | O que fazer |
 |---|---|
-| "Interface não configurada" | Preencha `tenant_id` e `client_id` na seção `web` |
-| "Login indisponível: segredo não cadastrado" | `jervis web set-secret` |
-| A Microsoft mostra erro `AADSTS50011` (endereço de retorno) | O endereço cadastrado no Entra ID tem que ser exatamente o de `jervis web check` |
-| "Acesso ainda não liberado" | `jervis web users add <e-mail> --role ...` |
-| "Acesso negado" sem nem chegar ao login | O IP da pessoa está fora de `allowed_networks` (VPN em outra faixa?) |
-| Aviso de site não seguro no navegador | Instale `jervis-ca.cer` naquele computador (passo 4) |
-| A página não abre de outro computador | Firewall (passo 5), ou o nome `ctgnotcwb010` não resolve na rede: teste com o IP |
+| "E-mail ou senha incorretos" | Confira o e-mail. Esqueceu a senha? Um admin usa **Nova senha** |
+| "Conta bloqueada por tentativas erradas" | Espere 15 minutos, ou um admin usa **Nova senha** (também desbloqueia) |
+| "Código incorreto ou expirado" | Confira se o horário do celular está automático. Trocou de celular? **Redefinir app** |
+| "Muitas tentativas erradas a partir deste computador" | Espere 15 minutos |
+| "Acesso negado" sem nem ver o login | O IP da pessoa está fora de `allowed_networks` (VPN em outra faixa?) |
+| Aviso de site não seguro no navegador | Instale `jervis-ca.cer` naquele computador (passo 6) |
+| A página não abre de outro computador | Firewall (passo 2), ou o nome `ctgnotcwb010` não resolve na rede: teste com o IP |

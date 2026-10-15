@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Usuários · Jervis3000</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/common.js" defer></script>
+  <script src="/static/usuarios.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="logo"><b>Jervis3000</b><span>Relatórios de TI</span></div>
+    <nav class="nav" aria-label="Módulos">
+      <a href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 11l2 2 4-4"/><rect x="4" y="3" width="16" height="18" rx="2"/></svg>
+        Revisões</a>
+      <a href="/usuarios" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c.8-3.4 3.2-5 6-5s5.2 1.6 6 5M16 5.5a3 3 0 010 5.6M18 15c1.6.7 2.6 2.4 3 5"/></svg>
+        Usuários</a>
+    </nav>
+    <div class="side-foot">
+      <span class="who"><b id="userName"></b><small id="userRole"></small></span>
+      <a class="link" href="/conta/senha">Trocar senha</a>
+      <a class="link" href="/conta/mfa">App autenticador</a>
+      <button type="button" class="link" id="logout">Sair</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="head">
+      <div>
+        <h1>Usuários</h1>
+        <p id="subtitle">Quem pode entrar no Jervis e o que cada um pode fazer.</p>
+      </div>
+      <button type="button" class="btn primary" id="newUser">Nova conta</button>
+    </div>
+
+    <div class="banner" id="banner" hidden></div>
+
+    <form class="card form-grid" id="createForm" hidden>
+      <h2>Nova conta</h2>
+      <div class="field">
+        <label for="cName">Nome</label>
+        <input id="cName" name="nome" required maxlength="255" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="cEmail">E-mail (é o login)</label>
+        <input id="cEmail" name="email" type="email" required maxlength="255" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="cRole">Perfil</label>
+        <select id="cRole" name="perfil">
+          <option value="leitura">Leitura: vê e abre os relatórios</option>
+          <option value="revisor" selected>Revisor: também aprova e rejeita</option>
+          <option value="admin">Administrador: também gera de novo e cria contas</option>
+        </select>
+      </div>
+      <div class="row">
+        <button type="button" class="btn" id="cancelCreate">Cancelar</button>
+        <button type="submit" class="btn primary">Criar conta</button>
+      </div>
+    </form>
+
+    <div class="card secret-card" id="secretCard" hidden></div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Situação</th><th>App autenticador</th><th>Último login</th><th class="right">Ações</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Revisões · Jervis3000</title>
   <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/common.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -15,16 +16,15 @@
       <a href="/" aria-current="page">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 11l2 2 4-4"/><rect x="4" y="3" width="16" height="18" rx="2"/></svg>
         Revisões <span class="count" id="navCount" hidden>0</span></a>
-      <span class="nav-item soon-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
-        Fechamento <span class="soon">em breve</span></span>
-      <span class="nav-item soon-item">
+      <a href="/usuarios" id="navUsers" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c.8-3.4 3.2-5 6-5s5.2 1.6 6 5M16 5.5a3 3 0 010 5.6M18 15c1.6.7 2.6 2.4 3 5"/></svg>
-        Clientes <span class="soon">em breve</span></span>
+        Usuários</a>
     </nav>
     <div class="side-foot">
       <span id="nextClose"></span>
       <span class="who"><b id="userName"></b><small id="userRole"></small></span>
+      <a class="link" href="/conta/senha">Trocar senha</a>
+      <a class="link" href="/conta/mfa">App autenticador</a>
       <button type="button" class="link" id="logout">Sair</button>
     </div>
   </aside>

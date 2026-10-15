@@ -21,7 +21,7 @@ dependencies = [
     "anthropic>=1.12.1",
     "flask>=3.0",
     "cheroot>=10.0",
-    "msal>=1.31",
+    "segno>=1.6",
 ]
 
 # Gerenciado com uv:  py -3.12 -m uv sync   (instala também o grupo dev)
@@ -35,7 +35,7 @@ jervis = "jervis.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-jervis = ["templates/*.yaml", "reports/templates/*.j2", "web/static/*"]
+jervis = ["templates/*.yaml", "reports/templates/*.j2", "web/static/*", "web/templates/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

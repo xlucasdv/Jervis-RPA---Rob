@@ -161,19 +161,19 @@ class DatabaseConfig:
 
 
 WEB_ROLES = ("leitura", "revisor", "admin")
+# Quem precisa do código do app autenticador (MFA) para entrar na interface
+WEB_MFA = ("todos", "admin", "nenhum")
 # Rede interna e VPN (faixas privadas) e a própria máquina
 DEFAULT_WEB_NETWORKS = ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
-_GUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 
 @dataclass
 class WebConfig:
-    """Interface web da equipe (jervis web serve): login com a conta Microsoft 365 (aplicativo no Entra ID). O
-    segredo do aplicativo fica no cofre (jervis web set-secret), nunca neste arquivo."""
+    """Interface web da equipe (jervis web serve), com contas próprias do Jervis: o admin cria os logins dos
+    colegas (senha temporária, trocada no primeiro acesso) e cada um configura o app autenticador."""
 
-    public_url: str = ""  # endereço que a equipe abre (https://<máquina>:8443); o login volta em <public_url>/auth/callback
-    tenant_id: str = ""   # ID do diretório (locatário) no Entra ID
-    client_id: str = ""   # ID do aplicativo (cliente) no Entra ID
+    public_url: str = ""  # endereço que a equipe abre (https://<máquina>:8443): entra no certificado e nas mensagens
+    mfa: str = "todos"    # todos | admin | nenhum: quem precisa do código do app autenticador
     host: str = "0.0.0.0"
     port: int = 8443
     cert_file: str = "config/web/jervis-web.pem"
@@ -181,13 +181,8 @@ class WebConfig:
     allowed_networks: list[str] = field(default_factory=lambda: list(DEFAULT_WEB_NETWORKS))
     session_hours: int = 8
 
-    @property
-    def redirect_uri(self) -> str:
-        return f"{self.public_url.rstrip('/')}/auth/callback"
-
-    def missing(self) -> list[str]:
-        """O que falta preencher para o login funcionar."""
-        return [name for name in ("public_url", "tenant_id", "client_id") if not getattr(self, name)]
+    def mfa_required(self, role: str) -> bool:
+        return self.mfa == "todos" or (self.mfa == "admin" and role == "admin")
 
 
 @dataclass
@@ -366,10 +361,10 @@ def parse_config(raw: Any) -> AppConfig:
 def _parse_web(data: Any) -> WebConfig:
     where = "web"
     if not isinstance(data, dict):
-        raise ConfigError(f"'{where}' deve ser um mapeamento (public_url, tenant_id, client_id...).")
+        raise ConfigError(f"'{where}' deve ser um mapeamento (public_url, port, mfa...).")
     _reject_unknown(data, {f.name for f in fields(WebConfig)}, where)
     web = WebConfig(**{k: ("" if v is None else v) for k, v in data.items()})
-    for name in ("public_url", "tenant_id", "client_id", "host", "cert_file", "key_file"):
+    for name in ("public_url", "mfa", "host", "cert_file", "key_file"):
         if not isinstance(getattr(web, name), str):
             raise ConfigError(f"{where}.{name} deve ser um texto.")
     web.public_url = web.public_url.strip().rstrip("/")
@@ -377,13 +372,9 @@ def _parse_web(data: Any) -> WebConfig:
         parsed = urlparse(web.public_url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.path not in ("", "/"):
             raise ConfigError(f"{where}.public_url deve ser o endereço https da interface, ex.: https://pc-ti:8443 "
-                              "(o login da Microsoft só volta para endereços https).")
-    for name in ("tenant_id", "client_id"):
-        value = getattr(web, name).strip()
-        if value and not _GUID.fullmatch(value):
-            raise ConfigError(f"{where}.{name} deve ser o identificador (GUID) mostrado no Entra ID, "
-                              "ex.: 0f8fad5b-d9cb-469f-a165-70867728950e.")
-        setattr(web, name, value.lower())
+                              "(as senhas só trafegam por HTTPS).")
+    if web.mfa not in WEB_MFA:
+        raise ConfigError(f"{where}.mfa deve ser um de: {', '.join(WEB_MFA)}.")
     if not isinstance(web.port, int) or isinstance(web.port, bool) or not 0 < web.port < 65536:
         raise ConfigError(f"{where}.port deve ser uma porta entre 1 e 65535.")
     if not isinstance(web.session_hours, int) or isinstance(web.session_hours, bool) or not 1 <= web.session_hours <= 24:

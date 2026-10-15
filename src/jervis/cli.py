@@ -196,29 +196,34 @@ def _build_parser() -> argparse.ArgumentParser:
     p.set_defaults(handler=cmd_notify_test)
 
     # --- web ---
-    webp = sub.add_parser("web", help="interface web da equipe (revisão dos relatórios, login Microsoft 365)").add_subparsers(
+    webp = sub.add_parser("web", help="interface web da equipe (revisão dos relatórios, contas próprias)").add_subparsers(
         title="ações", metavar="<ação>", required=True)
     p = webp.add_parser("serve", help="sobe a interface (HTTPS) para a equipe; Ctrl+C para parar")
     p.add_argument("--host", help="endereço de escuta (padrão: web.host)")
     p.add_argument("--port", type=int, help="porta (padrão: web.port)")
     p.set_defaults(handler=cmd_web_serve)
-    p = webp.add_parser("check", help="o que falta para a interface funcionar (configuração, segredo, certificado, usuários)")
+    p = webp.add_parser("check", help="o que falta para a interface funcionar (configuração, certificado, contas)")
     p.set_defaults(handler=cmd_web_check)
     p = webp.add_parser("cert", help="cria o certificado HTTPS desta máquina (e a autoridade interna, na primeira vez)")
     p.add_argument("--name", action="append", default=[], help="nome ou IP extra do certificado (pode repetir)")
     p.add_argument("--force", action="store_true", help="substitui o certificado do servidor existente")
     p.set_defaults(handler=cmd_web_cert)
-    p = webp.add_parser("set-secret", help="cadastra no cofre o segredo do aplicativo no Entra ID (pedido de forma oculta)")
-    p.set_defaults(handler=cmd_web_set_secret)
-    users = webp.add_parser("users", help="quem pode entrar e com qual perfil").add_subparsers(title="ações", metavar="<ação>", required=True)
-    p = users.add_parser("list", help="pessoas com acesso")
+    users = webp.add_parser("users", help="contas da interface (também pela página Usuários, para admins)").add_subparsers(
+        title="ações", metavar="<ação>", required=True)
+    p = users.add_parser("list", help="contas e situação")
     p.set_defaults(handler=cmd_web_users_list)
-    p = users.add_parser("add", help="libera o acesso de uma conta Microsoft 365")
-    p.add_argument("email", help="conta Microsoft 365 (nome@empresa.com.br)")
+    p = users.add_parser("add", help="cria uma conta e mostra a senha temporária (trocada no primeiro login)")
+    p.add_argument("email", help="e-mail da pessoa (é o login)")
+    p.add_argument("--name", required=True, help="nome da pessoa")
     p.add_argument("--role", required=True, choices=repository.WEB_ROLES,
-                   help="leitura: vê e abre; revisor: também aprova e rejeita; admin: também gera de novo e desfaz revisões")
-    p.add_argument("--name", help="nome (opcional: vem do login)")
+                   help="leitura: vê e abre; revisor: também aprova e rejeita; admin: também gera de novo e cria contas")
     p.set_defaults(handler=cmd_web_users_add)
+    p = users.add_parser("reset-password", help="nova senha temporária (esqueceu a senha ou conta bloqueada)")
+    p.add_argument("email")
+    p.set_defaults(handler=cmd_web_users_reset_password)
+    p = users.add_parser("reset-mfa", help="apaga o app autenticador da conta (configura de novo no próximo login)")
+    p.add_argument("email")
+    p.set_defaults(handler=cmd_web_users_reset_mfa)
     p = users.add_parser("role", help="muda o perfil")
     p.add_argument("email")
     p.add_argument("role", choices=repository.WEB_ROLES)
@@ -1044,10 +1049,6 @@ def cmd_notify_set_webhook(args: argparse.Namespace, config: AppConfig) -> int:
 # --- interface web --------------------------------------------------------------
 
 
-# Segredo do aplicativo no Entra ID (jervis.web.app.CLIENT_SECRET; repetido aqui para o terminal não carregar o Flask)
-CLIENT_SECRET = "web:client_secret"
-
-
 def _require_web(config: AppConfig):
     if not config.web:
         raise ConfigError("Interface web não configurada: inclua a seção 'web' no arquivo de configuração "
@@ -1061,20 +1062,17 @@ def cmd_web_serve(args: argparse.Namespace, config: AppConfig) -> int:
 
     web = _require_web(config)
     _require_database(config)
-    missing = web.missing()
-    if missing:
-        raise ConfigError(f"Falta preencher na seção web: {', '.join(missing)}. Veja 'jervis web check'.")
     store = _store(config)
-    if not store.get_secret(CLIENT_SECRET):
-        raise ConfigError("Segredo do aplicativo no Entra ID não cadastrado: rode 'jervis web set-secret'.")
+    if web.mfa != "nenhum":
+        crypto.load_key(store)  # a chave do app autenticador fica criptografada com ela: sem chave, nem sobe
     with _db(config) as conn:
-        admins = [u for u in repository.list_web_users(conn) if u.active and u.role == "admin"]
+        admins = repository.active_admins(conn)
     if not admins:
-        print("Atenção: ninguém com perfil admin. Libere o seu acesso: jervis web users add <seu e-mail> --role admin")
+        raise ConfigError("Nenhuma conta admin. Crie a sua: jervis web users add <seu e-mail> --name \"Seu Nome\" --role admin")
     host, port = args.host or web.host, args.port or web.port
     app = create_app(config, store)
-    _audit(config, "web_iniciada", endereco=f"{host}:{port}", url=web.public_url)
-    print(f"Interface do Jervis em {web.public_url}  (escutando em {host}:{port}; Ctrl+C para parar)")
+    _audit(config, "web_iniciada", endereco=f"{host}:{port}", url=web.public_url or None)
+    print(f"Interface do Jervis em {web.public_url or f'https://{host}:{port}'}  (escutando em {host}:{port}; Ctrl+C para parar)")
     serve(app, host, port, web.cert_file, web.key_file)
     print("Interface encerrada.")
     return EXIT_OK
@@ -1092,11 +1090,7 @@ def cmd_web_check(args: argparse.Namespace, config: AppConfig) -> int:
         print(f"  [{'ok' if good else 'falta'}] {text}")
 
     print("Interface web:")
-    missing = web.missing()
-    line(not missing, "configuração (public_url, tenant_id, client_id)" + (f": falta {', '.join(missing)}" if missing else ""))
-    if web.public_url:
-        print(f"         Endereço de retorno para cadastrar no Entra ID: {web.redirect_uri}")
-    line(bool(_store(config).get_secret(CLIENT_SECRET)), "segredo do aplicativo no cofre (jervis web set-secret)")
+    line(bool(web.public_url), f"endereço da equipe (public_url): {web.public_url or 'não preenchido'}")
     info = certificate_info(Path(web.cert_file))
     if info:
         expires, names = info
@@ -1107,11 +1101,19 @@ def cmd_web_check(args: argparse.Namespace, config: AppConfig) -> int:
             line(False, f"o certificado não inclui '{host}' (endereço de public_url): jervis web cert --force --name {host}")
     else:
         line(False, "certificado HTTPS (jervis web cert)")
+    if web.mfa != "nenhum":
+        try:
+            crypto.load_key(_store(config))
+            line(True, f"app autenticador obrigatório para: {web.mfa} (chave de criptografia no cofre)")
+        except JervisError as exc:
+            line(False, f"chave de criptografia do app autenticador: {exc}")
+    else:
+        print("  [aviso] app autenticador desligado (web.mfa: nenhum): só a senha protege as contas")
     if config.database:
         with _db(config) as conn:
             people = [u for u in repository.list_web_users(conn) if u.active]
-        line(any(u.role == "admin" for u in people), f"{len(people)} pessoa(s) com acesso, ao menos um admin "
-             "(jervis web users add <e-mail> --role admin)")
+        line(any(u.role == "admin" for u in people), f"{len(people)} conta(s) ativa(s), ao menos um admin "
+             "(jervis web users add <e-mail> --name \"Nome\" --role admin)")
     else:
         line(False, "banco de dados configurado (seção database)")
     print(f"  Redes aceitas: {', '.join(web.allowed_networks)}")
@@ -1142,35 +1144,61 @@ def cmd_web_cert(args: argparse.Namespace, config: AppConfig) -> int:
     return EXIT_OK
 
 
-def cmd_web_set_secret(args: argparse.Namespace, config: AppConfig) -> int:
-    _require_web(config)
-    secret = getpass.getpass("Segredo do aplicativo no Entra ID (o 'Valor', não exibido): ").strip()
-    if len(secret) < 20:
-        raise ConfigError("Isso não parece o valor do segredo (é um texto longo, mostrado só uma vez no Entra ID). "
-                          "Nada foi alterado.")
-    _store(config).set_secret(CLIENT_SECRET, secret)
-    _audit(config, "web_segredo_cadastrado")
-    print("Segredo salvo no cofre do sistema. Reinicie a interface (jervis web serve) se ela estiver rodando.")
-    return EXIT_OK
+def _show_temporary(config: AppConfig, user, password: str) -> None:
+    # Mostrada uma vez, só neste terminal (não vai para log nem auditoria)
+    print(f"Senha temporária de {user.email}:  {password}")
+    mfa = config.web is not None and config.web.mfa_required(user.role)
+    print("Passe para a pessoa por um canal privado. No primeiro login ela cria a senha dela"
+          + (" e configura o app autenticador." if mfa else "."))
 
 
 def cmd_web_users_list(args: argparse.Namespace, config: AppConfig) -> int:
     with _db(config) as conn:
         people = repository.list_web_users(conn)
     if not people:
-        print("Ninguém com acesso ainda. Libere: jervis web users add <e-mail> --role admin")
+        print("Nenhuma conta ainda. Crie a sua: jervis web users add <e-mail> --name \"Seu Nome\" --role admin")
         return EXIT_OK
-    _print_table(["E-MAIL", "NOME", "PERFIL", "ATIVO", "ÚLTIMO LOGIN"],
-                 [[u.email, u.name or "—", u.role, "sim" if u.active else "não", _local(u.last_login_at)] for u in people])
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    _print_table(["E-MAIL", "NOME", "PERFIL", "SITUAÇÃO", "APP AUTENTICADOR", "ÚLTIMO LOGIN"],
+                 [[u.email, u.name or "—", u.role,
+                   "suspensa" if not u.active else "bloqueada" if u.locked_until and u.locked_until > now
+                   else "senha temporária" if u.must_change_password else "ativa",
+                   "configurado" if u.mfa_configured else "—", _local(u.last_login_at)] for u in people])
     return EXIT_OK
 
 
 def cmd_web_users_add(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.web import passwords
+
+    temporary = passwords.temporary_password()
     with _db(config) as conn:
-        repository.add_web_user(conn, args.email, args.role, args.name)
-    email = args.email.strip().lower()
-    _audit(config, "web_usuario_liberado", email=email, perfil=args.role)
-    print(f"{email} pode entrar na interface com o perfil {args.role}.")
+        user_id = repository.add_web_user(conn, args.email, args.name, args.role, passwords.hash_password(temporary))
+        user = repository.get_web_user(conn, user_id)
+    _audit(config, "web_usuario_criado", email=user.email, perfil=user.role)
+    print(f"Conta criada: {user.email} ({user.role}).")
+    _show_temporary(config, user, temporary)
+    return EXIT_OK
+
+
+def cmd_web_users_reset_password(args: argparse.Namespace, config: AppConfig) -> int:
+    from jervis.web import passwords
+
+    temporary = passwords.temporary_password()
+    with _db(config) as conn:
+        user = repository.require_web_user(conn, args.email)
+        repository.set_web_password(conn, user.id, passwords.hash_password(temporary), temporary=True)
+    _audit(config, "web_senha_redefinida", email=user.email)
+    print(f"Senha de {user.email} redefinida (conta desbloqueada, sessões abertas encerradas).")
+    _show_temporary(config, user, temporary)
+    return EXIT_OK
+
+
+def cmd_web_users_reset_mfa(args: argparse.Namespace, config: AppConfig) -> int:
+    with _db(config) as conn:
+        user = repository.require_web_user(conn, args.email)
+        repository.set_web_mfa(conn, user.id, None)
+    _audit(config, "web_mfa_redefinido", email=user.email)
+    print(f"{user.email} vai configurar o app autenticador de novo no próximo login.")
     return EXIT_OK
 
 
