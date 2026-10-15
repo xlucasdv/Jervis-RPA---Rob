@@ -115,6 +115,16 @@ platforms:
 #   port: 3306
 #   name: jervis3000
 
+# Interface web da equipe (opcional): revisão dos relatórios no navegador, com login Microsoft 365.
+# Passo a passo: docs/interface-web.md. Segredo do aplicativo no Entra ID: jervis web set-secret (cofre).
+# web:
+#   public_url: https://pc-ti:8443        # endereço que a equipe abre; o login volta em <public_url>/auth/callback
+#   tenant_id: ""                         # Entra ID > ID do diretório (locatário)
+#   client_id: ""                         # Entra ID > Registros de aplicativo > ID do aplicativo (cliente)
+#   port: 8443
+#   allowed_networks: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8]   # padrão: rede interna e VPN
+#   session_hours: 8                      # horas até pedir o login de novo
+
 # Agendamentos (Épico 7). Instale no Agendador de Tarefas do Windows com: jervis schedule install
 # Use aspas nos horários ("07:00"): sem elas, o YAML pode interpretá-los como números.
 schedules:

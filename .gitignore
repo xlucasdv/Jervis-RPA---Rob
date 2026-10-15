@@ -18,3 +18,5 @@ config/platforms.yaml
 config/platforms.*.yaml
 # Notas da equipe por cliente para os relatórios (conteúdo dos clientes)
 notas/
+# Certificado HTTPS da interface web e chave da autoridade interna (jervis web cert): nunca no git
+config/web/

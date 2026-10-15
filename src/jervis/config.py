@@ -7,6 +7,7 @@ seletores). Credenciais ficam no cofre do sistema ou em variáveis de ambiente
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import tempfile
@@ -159,6 +160,36 @@ class DatabaseConfig:
     connect_timeout: int = 10
 
 
+WEB_ROLES = ("leitura", "revisor", "admin")
+# Rede interna e VPN (faixas privadas) e a própria máquina
+DEFAULT_WEB_NETWORKS = ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+_GUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+@dataclass
+class WebConfig:
+    """Interface web da equipe (jervis web serve): login com a conta Microsoft 365 (aplicativo no Entra ID). O
+    segredo do aplicativo fica no cofre (jervis web set-secret), nunca neste arquivo."""
+
+    public_url: str = ""  # endereço que a equipe abre (https://<máquina>:8443); o login volta em <public_url>/auth/callback
+    tenant_id: str = ""   # ID do diretório (locatário) no Entra ID
+    client_id: str = ""   # ID do aplicativo (cliente) no Entra ID
+    host: str = "0.0.0.0"
+    port: int = 8443
+    cert_file: str = "config/web/jervis-web.pem"
+    key_file: str = "config/web/jervis-web.key"
+    allowed_networks: list[str] = field(default_factory=lambda: list(DEFAULT_WEB_NETWORKS))
+    session_hours: int = 8
+
+    @property
+    def redirect_uri(self) -> str:
+        return f"{self.public_url.rstrip('/')}/auth/callback"
+
+    def missing(self) -> list[str]:
+        """O que falta preencher para o login funcionar."""
+        return [name for name in ("public_url", "tenant_id", "client_id") if not getattr(self, name)]
+
+
 @dataclass
 class AppConfig:
     settings: Settings
@@ -167,6 +198,7 @@ class AppConfig:
     schedules: dict[str, ScheduleConfig] = field(default_factory=dict)
     notifications: NotificationConfig | None = None
     database: DatabaseConfig | None = None  # None = sem banco (as tabelas não são criadas)
+    web: WebConfig | None = None  # None = interface web não configurada
     environment: str | None = None  # ex.: "hml"; None = configuração base
     overlay_path: Path | None = None  # arquivo do ambiente (platforms.<ambiente>.yaml)
     base_raw: dict[str, Any] | None = field(default=None, repr=False)  # conteúdo do arquivo base, para gravar só diferenças
@@ -314,7 +346,7 @@ def load_config(path: str | Path | None = None, env: str | None = None) -> AppCo
 def parse_config(raw: Any) -> AppConfig:
     if not isinstance(raw, dict):
         raise ConfigError("O arquivo de configuração deve conter um mapeamento YAML.")
-    _reject_unknown(raw, {"settings", "platforms", "schedules", "notifications", "database"}, "raiz do arquivo")
+    _reject_unknown(raw, {"settings", "platforms", "schedules", "notifications", "database", "web"}, "raiz do arquivo")
     settings = _parse_settings(raw.get("settings") or {})
     platforms_raw = raw.get("platforms") or {}
     if not isinstance(platforms_raw, dict):
@@ -326,8 +358,46 @@ def parse_config(raw: Any) -> AppConfig:
     schedules = {str(name): _parse_schedule(str(name), data or {}, platforms) for name, data in schedules_raw.items()}
     notifications = _parse_notifications(raw["notifications"]) if raw.get("notifications") else None
     database = _parse_database(raw["database"]) if raw.get("database") else None
+    web = _parse_web(raw["web"]) if raw.get("web") else None
     return AppConfig(settings=settings, platforms=platforms, schedules=schedules, notifications=notifications,
-                     database=database)
+                     database=database, web=web)
+
+
+def _parse_web(data: Any) -> WebConfig:
+    where = "web"
+    if not isinstance(data, dict):
+        raise ConfigError(f"'{where}' deve ser um mapeamento (public_url, tenant_id, client_id...).")
+    _reject_unknown(data, {f.name for f in fields(WebConfig)}, where)
+    web = WebConfig(**{k: ("" if v is None else v) for k, v in data.items()})
+    for name in ("public_url", "tenant_id", "client_id", "host", "cert_file", "key_file"):
+        if not isinstance(getattr(web, name), str):
+            raise ConfigError(f"{where}.{name} deve ser um texto.")
+    web.public_url = web.public_url.strip().rstrip("/")
+    if web.public_url:
+        parsed = urlparse(web.public_url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.path not in ("", "/"):
+            raise ConfigError(f"{where}.public_url deve ser o endereço https da interface, ex.: https://pc-ti:8443 "
+                              "(o login da Microsoft só volta para endereços https).")
+    for name in ("tenant_id", "client_id"):
+        value = getattr(web, name).strip()
+        if value and not _GUID.fullmatch(value):
+            raise ConfigError(f"{where}.{name} deve ser o identificador (GUID) mostrado no Entra ID, "
+                              "ex.: 0f8fad5b-d9cb-469f-a165-70867728950e.")
+        setattr(web, name, value.lower())
+    if not isinstance(web.port, int) or isinstance(web.port, bool) or not 0 < web.port < 65536:
+        raise ConfigError(f"{where}.port deve ser uma porta entre 1 e 65535.")
+    if not isinstance(web.session_hours, int) or isinstance(web.session_hours, bool) or not 1 <= web.session_hours <= 24:
+        raise ConfigError(f"{where}.session_hours deve ser de 1 a 24 (horas até pedir o login de novo).")
+    networks = web.allowed_networks if isinstance(web.allowed_networks, list) else [web.allowed_networks]
+    if not networks:
+        raise ConfigError(f"{where}.allowed_networks: informe ao menos uma rede (ex.: 192.168.0.0/16).")
+    for network in networks:
+        try:
+            ipaddress.ip_network(str(network), strict=False)
+        except ValueError as exc:
+            raise ConfigError(f"{where}.allowed_networks: '{network}' não é uma rede válida (ex.: 10.0.0.0/8).") from exc
+    web.allowed_networks = [str(n) for n in networks]
+    return web
 
 
 _DB_NAME = re.compile(r"[A-Za-z0-9_]{1,64}")
@@ -566,6 +636,8 @@ def to_dict(config: AppConfig) -> dict[str, Any]:
         }
     if config.database:
         data["database"] = {f.name: getattr(config.database, f.name) for f in fields(DatabaseConfig)}
+    if config.web:
+        data["web"] = {f.name: getattr(config.web, f.name) for f in fields(WebConfig)}
     if config.schedules:
         data["schedules"] = {
             name: {f.name: getattr(s, f.name) for f in fields(ScheduleConfig) if f.name != "name"}

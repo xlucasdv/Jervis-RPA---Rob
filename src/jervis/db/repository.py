@@ -8,6 +8,7 @@ A chave MFA entra e sai já criptografada; descriptografar é responsabilidade d
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -413,6 +414,111 @@ def review_report(conn, report_id: int, status: str, reviewer: str, note: str | 
                     (status, reviewer, (note or None) and note[:1024], report_id))
         if cur.rowcount == 0:
             raise RecordError(f"O relatório #{report_id} não está pendente de revisão.")
+
+
+def reopen_report(conn, report_id: int) -> None:
+    """Aprovado ou rejeitado volta a pendente (engano na revisão), se ainda for a geração mais recente do cliente."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT customer_id, competencia, status FROM customer_reports WHERE id = %s", (report_id,))
+        row = cur.fetchone()
+        if not row:
+            raise RecordError(f"Relatório #{report_id} não encontrado.")
+        customer_id, competencia, status = row
+        if status not in ("aprovado", "rejeitado"):
+            raise RecordError(f"O relatório #{report_id} não foi revisado (situação: {status}).")
+        cur.execute("SELECT COUNT(*) FROM customer_reports WHERE customer_id = %s AND competencia <=> %s AND id > %s "
+                    "AND status <> 'falha'", (customer_id, competencia, report_id))
+        if cur.fetchone()[0]:
+            raise RecordError("Já existe uma geração mais nova desse relatório; revise a mais recente.")
+        cur.execute("UPDATE customer_reports SET status = 'pendente', revisado_por = NULL, revisado_em = NULL WHERE id = %s",
+                    (report_id,))
+
+
+def list_competencias(conn) -> list[str]:
+    """Meses (AAAA-MM) com relatórios gerados, do mais recente para o mais antigo."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT competencia FROM customer_reports WHERE competencia IS NOT NULL ORDER BY competencia DESC")
+        return [row[0] for row in cur.fetchall()]
+
+
+# --- usuários da interface web ----------------------------------------------------------
+
+WEB_ROLES = ("leitura", "revisor", "admin")
+
+
+@dataclass
+class WebUser:
+    id: int
+    email: str
+    name: str | None
+    role: str
+    active: bool
+    entra_oid: str | None
+    last_login_at: Any
+
+
+_WEB_USER_COLUMNS = "id, email, name, role, active, entra_oid, last_login_at"
+
+
+def _web_user(row) -> WebUser:
+    return WebUser(row[0], row[1], row[2], row[3], bool(row[4]), row[5], row[6])
+
+
+def normalize_email(email: str) -> str:
+    email = (email or "").strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise RecordError(f"'{email}' não parece uma conta Microsoft 365 (nome@empresa.com.br).")
+    return email
+
+
+def list_web_users(conn) -> list[WebUser]:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {_WEB_USER_COLUMNS} FROM web_users ORDER BY active DESC, email")
+        return [_web_user(row) for row in cur.fetchall()]
+
+
+def find_web_user(conn, email: str) -> WebUser | None:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {_WEB_USER_COLUMNS} FROM web_users WHERE email = %s", ((email or "").strip().lower(),))
+        row = cur.fetchone()
+    return _web_user(row) if row else None
+
+
+def get_web_user(conn, user_id: int) -> WebUser | None:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {_WEB_USER_COLUMNS} FROM web_users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+    return _web_user(row) if row else None
+
+
+def add_web_user(conn, email: str, role: str, name: str | None = None) -> int:
+    email = normalize_email(email)
+    if role not in WEB_ROLES:
+        raise RecordError(f"Perfil '{role}' inválido. Opções: {', '.join(WEB_ROLES)}.")
+    if find_web_user(conn, email):
+        raise RecordError(f"{email} já tem acesso. Para mudar o perfil: jervis web users role {email} <perfil>.")
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO web_users (email, name, role) VALUES (%s, %s, %s)", (email, _blank_to_none(name), role))
+        return cur.lastrowid
+
+
+def update_web_user(conn, email: str, role: str | None = None, active: bool | None = None) -> WebUser:
+    user = find_web_user(conn, email)
+    if not user:
+        raise RecordError(f"{email} não tem acesso à interface. Veja 'jervis web users list'.")
+    if role is not None and role not in WEB_ROLES:
+        raise RecordError(f"Perfil '{role}' inválido. Opções: {', '.join(WEB_ROLES)}.")
+    with conn.cursor() as cur:
+        cur.execute("UPDATE web_users SET role = COALESCE(%s, role), active = COALESCE(%s, active) WHERE id = %s",
+                    (role, None if active is None else int(active), user.id))
+    return get_web_user(conn, user.id)
+
+
+def record_web_login(conn, user_id: int, entra_oid: str | None, name: str | None) -> None:
+    """Primeiro login grava o ID da conta no Entra ID; os seguintes só atualizam nome e horário."""
+    with conn.cursor() as cur:
+        cur.execute("UPDATE web_users SET entra_oid = COALESCE(entra_oid, %s), name = COALESCE(%s, name), "
+                    "last_login_at = NOW() WHERE id = %s", (entra_oid, _blank_to_none(name), user_id))
 
 
 def _blank_to_none(value: str | None) -> str | None:

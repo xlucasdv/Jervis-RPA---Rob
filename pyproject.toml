@@ -19,6 +19,9 @@ dependencies = [
     "celery>=5.4",        # fila de tarefas
     "amqp>=5.2",          # protocolo do RabbitMQ (broker do Celery)
     "anthropic>=1.12.1",
+    "flask>=3.0",
+    "cheroot>=10.0",
+    "msal>=1.31",
 ]
 
 # Gerenciado com uv:  py -3.12 -m uv sync   (instala também o grupo dev)
@@ -32,7 +35,7 @@ jervis = "jervis.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-jervis = ["templates/*.yaml", "reports/templates/*.j2"]
+jervis = ["templates/*.yaml", "reports/templates/*.j2", "web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

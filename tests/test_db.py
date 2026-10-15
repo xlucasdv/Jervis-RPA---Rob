@@ -41,7 +41,7 @@ def test_invalid_database_section(section, message):
 
 
 def test_tables_and_creation_order():
-    assert TABLE_NAMES == ["customers", "service", "customer_services", "customer_reports"]  # referenciadas antes
+    assert TABLE_NAMES == ["customers", "service", "customer_services", "customer_reports", "web_users"]  # referenciadas antes
     ddl = dict(TABLES)
     assert all(sql.lstrip().startswith(f"CREATE TABLE IF NOT EXISTS {name} (") for name, sql in TABLES)
     assert "desk_manager_id" in ddl["customers"] and "name VARCHAR(255) NOT NULL" in ddl["customers"]
@@ -111,7 +111,7 @@ def store(memory_keyring):
 def test_ensure_schema_creates_only_missing_tables(store):
     server = FakeServer(existing={"customers"})
     created = db.ensure_schema(DB, store, connector=server)
-    assert created == ["service", "customer_services", "customer_reports"]
+    assert created == ["service", "customer_services", "customer_reports", "web_users"]
     assert server.executed[0].startswith("CREATE DATABASE IF NOT EXISTS `jervis_teste`")
     assert not any("CREATE TABLE IF NOT EXISTS customers" in sql for sql in server.executed)
     assert server.connections[0]["database"] is None and server.connections[1]["database"] == "jervis_teste"

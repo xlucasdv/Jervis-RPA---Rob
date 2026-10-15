@@ -44,12 +44,13 @@ class AuditLog:
         self.path = Path(path)
         self.environment = environment
 
-    def record(self, event: str, **details: Any) -> dict[str, Any]:
-        """Acrescenta um evento. ``details`` passa pela redação de segredos antes de ser gravado."""
+    def record(self, event: str, by: dict[str, str] | None = None, **details: Any) -> dict[str, Any]:
+        """Acrescenta um evento. ``details`` passa pela redação de segredos antes de ser gravado. ``by``: quem fez,
+        quando não é o usuário do sistema (ex.: a pessoa logada na interface web)."""
         entry = {
             "em": now_iso(),
             "evento": event,
-            **actor(),
+            **(by or actor()),
             "ambiente": self.environment,
             "detalhes": json.loads(redact(json.dumps(details, ensure_ascii=False, default=str))),
             "hash_anterior": self._last_hash(),

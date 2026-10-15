@@ -80,6 +80,19 @@ CREATE TABLE IF NOT EXISTS customer_reports (
 ) {_TABLE_OPTIONS} COMMENT='relatórios gerados por cliente e a revisão antes do envio'"""),
 ]
 
+TABLES.append(("web_users", f"""
+CREATE TABLE IF NOT EXISTS web_users (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  email VARCHAR(255) NOT NULL COMMENT 'conta Microsoft 365 (UPN), em minúsculas',
+  name VARCHAR(255) NULL COMMENT 'nome exibido (vem do login)',
+  role VARCHAR(16) NOT NULL COMMENT 'leitura | revisor | admin',
+  active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 = acesso suspenso',
+  entra_oid CHAR(36) NULL COMMENT 'ID da conta no Entra ID, gravado no primeiro login (e-mail reaproveitado não herda o acesso)',
+  last_login_at DATETIME NULL,{_TIMESTAMPS},
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_web_users_email (email)
+) {_TABLE_OPTIONS} COMMENT='quem pode entrar na interface web e com qual perfil'"""))
+
 TABLE_NAMES = [name for name, _ in TABLES]
 
 # Colunas incluídas depois da primeira versão: bancos criados antes recebem com ALTER TABLE (nada é apagado).
