@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jervis3000"
 version = "0.1.0"
-description = "Coleta automatizada de dados de TI (Sophos, Acronis e Zabbix) com Selenium"
+description = "Coleta por API (Acronis, Sophos Central, Zabbix), relatórios mensais por cliente e revisão pela equipe"
 requires-python = ">=3.11"
 dependencies = [
     "selenium>=4.20",
